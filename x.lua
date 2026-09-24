@@ -1,3 +1,4 @@
+--2
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 
 local Players = game:GetService("Players")
@@ -13,46 +14,34 @@ local ToF_Config = {
     Laser = true,
     WallCheck = false,
     BlockKnocked = true,
-    TargetMode = "Killer",
-    Speed = 400
+    TargetMode = "Killer"
 }
 
-local ToF_Internal = {
+local ToF_State = {
     Connection = nil,
+    InputBegan = nil,
+    InputEnded = nil,
     TouchInput = nil,
     IsAiming = false,
-    LaserPart = nil,
-    Cache = {},
-    LastCache = 0
+    Laser = nil,
+    ZombieCache = {},
+    ZombieCacheTime = 0
 }
 
-local function IsBlocked()
-    if not ToF_Config.BlockKnocked then
-        return false
-    end
-
-    local char = LocalPlayer.Character
-    if not char then
-        return true
-    end
-
-    local state = char:GetAttribute("State")
-    local knocked = char:GetAttribute("Knocked")
-
-    return state == "Downed"
-        or state == "Dead"
-        or knocked == true
-end
-
-local function GetToFRemote()
+local function GetRemote()
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     local items = remotes and remotes:FindFirstChild("Items")
     local tof = items and items:FindFirstChild("Twist of Fate")
+    local fire = tof and tof:FindFirstChild("Fire")
 
-    return tof and tof:FindFirstChild("Fire")
+    if fire and fire:IsA("RemoteEvent") then
+        return fire
+    end
+
+    return nil
 end
 
-local function GetGunObject()
+local function GetGun()
     local char = LocalPlayer.Character
     if not char then
         return nil
@@ -63,28 +52,45 @@ local function GetGunObject()
         return nil
     end
 
-    local arm = tof:FindFirstChild("Right Arm")
-    if not arm then
-        return tof
+    local rightArm = tof:FindFirstChild("Right Arm")
+
+    if rightArm then
+        local gun = rightArm:FindFirstChild("gun")
+        if gun then
+            return gun
+        end
+
+        local emperorGun = rightArm:FindFirstChild("EmperorGun")
+        if emperorGun then
+            return emperorGun
+        end
     end
 
-    return arm:FindFirstChild("gun")
-        or arm:FindFirstChild("EmperorGun")
-        or tof
+    return tof
 end
 
-local function IsTouchOnShootButton(input)
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if not playerGui then
-        return false
+local function IsDowned(char)
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        return true
     end
 
-    local guiNames = {
-        "Survivor-mob",
-        "Slasher-mob"
-    }
+    local state = char:GetAttribute("State")
 
-    local buttonNames = {
+    return state == "Downed" or state == "Dead"
+end
+
+local function GetShootButton()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local survivorMob = playerGui and playerGui:FindFirstChild("Survivor-mob")
+    local controls = survivorMob and survivorMob:FindFirstChild("Controls")
+    local guiMob = controls and controls:FindFirstChild("Gui-mob")
+
+    if not guiMob then
+        return nil
+    end
+
+    local names = {
         "attack",
         "Attack",
         "shoot",
@@ -93,100 +99,110 @@ local function IsTouchOnShootButton(input)
         "Fire"
     }
 
-    for _, guiName in ipairs(guiNames) do
-        local gui = playerGui:FindFirstChild(guiName)
-        local controls = gui and gui:FindFirstChild("Controls")
-        local guiMob = controls and controls:FindFirstChild("Gui-mob")
+    for _, name in ipairs(names) do
+        local button = guiMob:FindFirstChild(name, true)
 
-        if guiMob and guiMob.Visible then
-            for _, buttonName in ipairs(buttonNames) do
-                local button = guiMob:FindFirstChild(buttonName, true)
-
-                if button
-                    and button:IsA("GuiObject")
-                    and button.Visible
-                    and button.AbsoluteSize.X > 0 then
-
-                    local position = input.Position
-                    local buttonPosition = button.AbsolutePosition
-                    local buttonSize = button.AbsoluteSize
-
-                    if position.X >= buttonPosition.X
-                        and position.X <= buttonPosition.X + buttonSize.X
-                        and position.Y >= buttonPosition.Y
-                        and position.Y <= buttonPosition.Y + buttonSize.Y then
-                        return true
-                    end
-                end
-            end
+        if button and button:IsA("GuiObject") then
+            return button
         end
     end
 
-    return false
+    for _, object in ipairs(guiMob:GetDescendants()) do
+        if object:IsA("GuiButton") and object.Visible then
+            return object
+        end
+    end
+
+    return guiMob:IsA("GuiObject") and guiMob or nil
 end
 
-local function IsTargetVisible(origin, targetPosition, targetCharacter)
-    local direction = targetPosition - origin
+local function IsTouchOnShootButton(input)
+    local button = GetShootButton()
 
-    if direction.Magnitude < 0.1 then
+    if not button or not button.Visible then
+        return false
+    end
+
+    local position = input.Position
+    local buttonPosition = button.AbsolutePosition
+    local buttonSize = button.AbsoluteSize
+
+    return position.X >= buttonPosition.X
+        and position.X <= buttonPosition.X + buttonSize.X
+        and position.Y >= buttonPosition.Y
+        and position.Y <= buttonPosition.Y + buttonSize.Y
+end
+
+local function IsVisible(origin, target, targetCharacter)
+    local direction = target - origin
+    local distance = direction.Magnitude
+
+    if distance < 0.1 then
         return true
     end
 
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
 
-    local filter = {}
+    local exclude = {}
 
     if LocalPlayer.Character then
-        table.insert(filter, LocalPlayer.Character)
+        table.insert(exclude, LocalPlayer.Character)
     end
 
-    if targetCharacter then
-        table.insert(filter, targetCharacter)
+    if targetCharacter and targetCharacter ~= LocalPlayer.Character then
+        table.insert(exclude, targetCharacter)
     end
 
-    if ToF_Internal.LaserPart then
-        table.insert(filter, ToF_Internal.LaserPart)
+    if ToF_State.Laser then
+        table.insert(exclude, ToF_State.Laser)
     end
 
-    params.FilterDescendantsInstances = filter
+    params.FilterDescendantsInstances = exclude
 
-    return Workspace:Raycast(origin, direction, params) == nil
+    local result = Workspace:Raycast(
+        origin,
+        direction.Unit * distance,
+        params
+    )
+
+    return result == nil
 end
 
 local function GetZombies()
-    if tick() - ToF_Internal.LastCache < 0.5 then
-        return ToF_Internal.Cache
+    if tick() - ToF_State.ZombieCacheTime < 0.5 then
+        return ToF_State.ZombieCache
     end
 
     local targets = {}
     local map = Workspace:FindFirstChild("Map")
 
     if map then
-        for _, object in ipairs(map:GetDescendants()) do
-            if object:IsA("Model")
-                and (
-                    object:GetAttribute("CorpseCreated0492")
-                    or object:GetAttribute("Zombie")
-                ) then
+        for _, object in pairs(map:GetDescendants()) do
+            if object:IsA("Model") then
+                local attributes = object:GetAttributes()
 
-                local root = object:FindFirstChild("HumanoidRootPart")
+                if object:GetAttribute("CorpseCreated0492")
+                    or next(attributes) ~= nil then
 
-                if root then
-                    table.insert(targets, root)
+                    local root = object:FindFirstChild("HumanoidRootPart")
+
+                    if root then
+                        table.insert(targets, root)
+                    end
                 end
             end
         end
     end
 
-    ToF_Internal.Cache = targets
-    ToF_Internal.LastCache = tick()
+    ToF_State.ZombieCache = targets
+    ToF_State.ZombieCacheTime = tick()
 
     return targets
 end
 
 local function GetTarget()
-    local gun = GetGunObject()
+    local gun = GetGun()
     local char = LocalPlayer.Character
 
     if not gun or not char then
@@ -194,45 +210,58 @@ local function GetTarget()
     end
 
     local hrp = char:FindFirstChild("HumanoidRootPart")
+
     if not hrp then
         return nil
     end
 
-    local myPos = hrp.Position
+    local myPosition = hrp.Position
     local origin
 
     if char:GetAttribute("IsCarried") then
         origin = hrp.Position + hrp.CFrame.LookVector * 2
     else
-        if gun:IsA("BasePart") then
-            origin = gun.Position
-        else
-            local part = gun:FindFirstChildOfClass("BasePart")
-            if part then
-                origin = part.Position
-            end
-        end
+        pcall(function()
+            if gun:IsA("BasePart") then
+                origin = gun.Position
+            else
+                local part = gun:FindFirstChildOfClass("BasePart")
 
-        origin = origin or Vector3.new(myPos.X, myPos.Y + 1.5, myPos.Z)
+                if part then
+                    origin = part.Position
+                end
+            end
+        end)
+
+        origin = origin or Vector3.new(
+            myPosition.X,
+            myPosition.Y + 1.5,
+            myPosition.Z
+        )
     end
 
     local function Predict(torso, targetCharacter)
         local targetPosition = torso.Position
 
         if ToF_Config.WallCheck
-            and not IsTargetVisible(origin, targetPosition, targetCharacter) then
+            and not IsVisible(
+                origin,
+                targetPosition,
+                targetCharacter
+            ) then
             return nil
         end
 
-        local velocity = Vector3.zero
-        local root = targetCharacter
+        local targetVelocity = Vector3.new(0, 0, 0)
+
+        local rootPart = targetCharacter
             and (
                 targetCharacter:FindFirstChild("HumanoidRootPart")
                 or torso
             )
 
-        if root then
-            velocity = root.Velocity
+        if rootPart then
+            targetVelocity = rootPart.Velocity
         end
 
         local direction = targetPosition - origin
@@ -244,33 +273,38 @@ local function GetTarget()
 
         if distance < 5 then
             return {
+                Direction = direction.Unit,
                 Origin = origin,
                 Target = targetPosition,
-                Direction = direction.Unit,
                 Gun = gun
             }
         end
 
-        local speed = math.max(ToF_Config.Speed, 1)
-        local travelTime = distance / speed
-        local predicted = targetPosition + velocity * travelTime
+        local travelTime = distance / 400
+        local predictedPosition =
+            targetPosition + targetVelocity * travelTime
 
         for _ = 1, 2 do
-            local newDistance = (predicted - origin).Magnitude
-            travelTime = newDistance / speed
-            predicted = targetPosition + velocity * travelTime
+            local newDistance =
+                (predictedPosition - origin).Magnitude
+
+            travelTime = newDistance / 400
+
+            predictedPosition =
+                targetPosition + targetVelocity * travelTime
         end
 
-        local finalDirection = predicted - origin
+        local finalDirection =
+            predictedPosition - origin
 
         if finalDirection.Magnitude < 0.1 then
             return nil
         end
 
         return {
-            Origin = origin,
-            Target = predicted,
             Direction = finalDirection.Unit,
+            Origin = origin,
+            Target = predictedPosition,
             Gun = gun
         }
     end
@@ -286,12 +320,14 @@ local function GetTarget()
                 and player.Team.Name == "Killer"
                 and player.Character then
 
-                local torso = player.Character:FindFirstChild("Torso")
+                local torso =
+                    player.Character:FindFirstChild("Torso")
                     or player.Character:FindFirstChild("UpperTorso")
                     or player.Character:FindFirstChild("HumanoidRootPart")
 
                 if torso then
-                    local distance = (myPos - torso.Position).Magnitude
+                    local distance =
+                        (myPosition - torso.Position).Magnitude
 
                     if distance < shortestDistance then
                         shortestDistance = distance
@@ -303,10 +339,14 @@ local function GetTarget()
         end
 
         if closestTorso then
-            return Predict(closestTorso, closestCharacter)
+            return Predict(
+                closestTorso,
+                closestCharacter
+            )
         end
     elseif ToF_Config.TargetMode == "Survivors" then
         local camera = Workspace.CurrentCamera
+
         if not camera then
             return nil
         end
@@ -314,6 +354,7 @@ local function GetTarget()
         local bestTorso
         local bestCharacter
         local bestDot = -math.huge
+
         local cameraPosition = camera.CFrame.Position
         local cameraLook = camera.CFrame.LookVector
 
@@ -323,15 +364,18 @@ local function GetTarget()
                 and player.Team.Name == "Survivors"
                 and player.Character then
 
-                local torso = player.Character:FindFirstChild("Torso")
+                local torso =
+                    player.Character:FindFirstChild("Torso")
                     or player.Character:FindFirstChild("UpperTorso")
                     or player.Character:FindFirstChild("HumanoidRootPart")
 
                 if torso then
-                    local direction = torso.Position - cameraPosition
+                    local direction =
+                        torso.Position - cameraPosition
 
                     if direction.Magnitude > 0.1 then
-                        local dot = cameraLook:Dot(direction.Unit)
+                        local dot =
+                            cameraLook:Dot(direction.Unit)
 
                         if dot > 0.5 and dot > bestDot then
                             bestDot = dot
@@ -344,25 +388,32 @@ local function GetTarget()
         end
 
         if bestTorso then
-            return Predict(bestTorso, bestCharacter)
+            return Predict(
+                bestTorso,
+                bestCharacter
+            )
         end
     elseif ToF_Config.TargetMode == "Zombie" then
         local camera = Workspace.CurrentCamera
+
         if not camera then
             return nil
         end
 
         local bestPart
         local bestDot = -math.huge
+
         local cameraPosition = camera.CFrame.Position
         local cameraLook = camera.CFrame.LookVector
 
         for _, root in ipairs(GetZombies()) do
             if root and root.Parent then
-                local direction = root.Position - cameraPosition
+                local direction =
+                    root.Position - cameraPosition
 
                 if direction.Magnitude > 0.1 then
-                    local dot = cameraLook:Dot(direction.Unit)
+                    local dot =
+                        cameraLook:Dot(direction.Unit)
 
                     if dot > 0.5 and dot > bestDot then
                         bestDot = dot
@@ -373,7 +424,10 @@ local function GetTarget()
         end
 
         if bestPart then
-            return Predict(bestPart, bestPart.Parent)
+            return Predict(
+                bestPart,
+                bestPart.Parent
+            )
         end
     end
 
@@ -381,7 +435,7 @@ local function GetTarget()
 end
 
 local function UpdateLaser(origin, target)
-    if not ToF_Internal.LaserPart then
+    if not ToF_State.Laser then
         local laser = Instance.new("Part")
 
         laser.Name = "ToFLaser"
@@ -393,153 +447,205 @@ local function UpdateLaser(origin, target)
         laser.Color = Color3.fromRGB(255, 50, 50)
         laser.Parent = Workspace
 
-        ToF_Internal.LaserPart = laser
+        ToF_State.Laser = laser
     end
 
-    local laser = ToF_Internal.LaserPart
     local distance = (target - origin).Magnitude
 
-    laser.Size = Vector3.new(0.05, 0.05, distance)
-    laser.CFrame = CFrame.new((origin + target) / 2, target)
-    laser.Transparency = 0
+    ToF_State.Laser.Size =
+        Vector3.new(0.05, 0.05, distance)
+
+    ToF_State.Laser.CFrame =
+        CFrame.new(
+            (origin + target) / 2,
+            target
+        )
+
+    ToF_State.Laser.Transparency = 0
 end
 
 local function ClearLaser()
-    if ToF_Internal.LaserPart then
-        ToF_Internal.LaserPart:Destroy()
-        ToF_Internal.LaserPart = nil
+    if ToF_State.Laser then
+        pcall(function()
+            ToF_State.Laser:Destroy()
+        end)
+
+        ToF_State.Laser = nil
     end
 end
 
-local function DoShoot()
-    if not ToF_Config.Enabled or IsBlocked() then
+local function Shoot()
+    if not ToF_Config.Enabled then
+        return
+    end
+
+    local char = LocalPlayer.Character
+
+    if char
+        and ToF_Config.BlockKnocked
+        and IsDowned(char) then
         return
     end
 
     local target = GetTarget()
+
     if not target then
         return
     end
 
-    local remote = GetToFRemote()
+    local remote = GetRemote()
+
     if not remote then
         return
     end
 
+    local direction =
+        target.Target - target.Origin
+
+    if direction.Magnitude < 0.1 then
+        return
+    end
+
     pcall(function()
-        remote:FireServer(target.Gun, target.Direction)
+        remote:FireServer(
+            target.Gun,
+            direction.Unit
+        )
     end)
 end
 
 local function StartInput()
-    if ToF_Internal.InputBegan then
+    if ToF_State.InputBegan then
         return
     end
 
-    ToF_Internal.InputBegan = UserInputService.InputBegan:Connect(function(input, processed)
-        if processed or not ToF_Config.Enabled then
-            return
-        end
-
-        local mouse = input.UserInputType == Enum.UserInputType.MouseButton1
-        local touch = input.UserInputType == Enum.UserInputType.Touch
-            and IsTouchOnShootButton(input)
-
-        if mouse or touch then
-            ToF_Internal.IsAiming = true
-            ToF_Internal.TouchInput = touch and input or nil
-            DoShoot()
-        end
-    end)
-
-    ToF_Internal.InputEnded = UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or (
-                input.UserInputType == Enum.UserInputType.Touch
-                and input == ToF_Internal.TouchInput
-            ) then
-
-            ToF_Internal.IsAiming = false
-            ToF_Internal.TouchInput = nil
-
-            if ToF_Internal.LaserPart then
-                ToF_Internal.LaserPart.Transparency = 1
+    ToF_State.InputBegan =
+        UserInputService.InputBegan:Connect(function(
+            input,
+            gameProcessed
+        )
+            if gameProcessed
+                or not ToF_Config.Enabled then
+                return
             end
-        end
-    end)
+
+            local mouse =
+                input.UserInputType ==
+                Enum.UserInputType.MouseButton1
+
+            local touch =
+                input.UserInputType ==
+                Enum.UserInputType.Touch
+                and IsTouchOnShootButton(input)
+
+            if mouse or touch then
+                ToF_State.IsAiming = true
+
+                if touch then
+                    ToF_State.TouchInput = input
+                end
+
+                Shoot()
+            end
+        end)
+
+    ToF_State.InputEnded =
+        UserInputService.InputEnded:Connect(function(input)
+            local mouse =
+                input.UserInputType ==
+                Enum.UserInputType.MouseButton1
+
+            local touch =
+                input.UserInputType ==
+                Enum.UserInputType.Touch
+                and input == ToF_State.TouchInput
+
+            if mouse or touch then
+                ToF_State.IsAiming = false
+                ToF_State.TouchInput = nil
+
+                if ToF_State.Laser then
+                    ToF_State.Laser.Transparency = 1
+                end
+            end
+        end)
 end
 
 local function StopInput()
-    if ToF_Internal.InputBegan then
-        ToF_Internal.InputBegan:Disconnect()
-        ToF_Internal.InputBegan = nil
+    if ToF_State.InputBegan then
+        ToF_State.InputBegan:Disconnect()
+        ToF_State.InputBegan = nil
     end
 
-    if ToF_Internal.InputEnded then
-        ToF_Internal.InputEnded:Disconnect()
-        ToF_Internal.InputEnded = nil
+    if ToF_State.InputEnded then
+        ToF_State.InputEnded:Disconnect()
+        ToF_State.InputEnded = nil
     end
 
-    ToF_Internal.IsAiming = false
-    ToF_Internal.TouchInput = nil
+    ToF_State.IsAiming = false
+    ToF_State.TouchInput = nil
 end
 
-local function StartHeartbeat()
-    if ToF_Internal.Connection then
+local function StartConnection()
+    if ToF_State.Connection then
         return
     end
 
-    ToF_Internal.Connection = RunService.Heartbeat:Connect(function()
-        if not ToF_Config.Enabled
-            or not ToF_Internal.IsAiming
-            or IsBlocked() then
+    ToF_State.Connection =
+        RunService.Heartbeat:Connect(function()
+            if not ToF_Config.Enabled
+                or not ToF_State.IsAiming then
 
-            if ToF_Internal.LaserPart then
-                ToF_Internal.LaserPart.Transparency = 1
+                if ToF_State.Laser then
+                    ToF_State.Laser.Transparency = 1
+                end
+
+                return
             end
 
-            return
-        end
+            local target = GetTarget()
 
-        local target = GetTarget()
+            if not target then
+                if ToF_State.Laser then
+                    ToF_State.Laser.Transparency = 1
+                end
 
-        if not target then
-            if ToF_Internal.LaserPart then
-                ToF_Internal.LaserPart.Transparency = 1
+                return
             end
 
-            return
-        end
+            local char = LocalPlayer.Character
+            local hrp =
+                char and char:FindFirstChild("HumanoidRootPart")
 
-        local char = LocalPlayer.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-
-        if hrp and not char:GetAttribute("IsCarried") then
-            hrp.CFrame = CFrame.new(
-                hrp.Position,
-                Vector3.new(
-                    target.Target.X,
-                    hrp.Position.Y,
-                    target.Target.Z
+            if hrp and not char:GetAttribute("IsCarried") then
+                hrp.CFrame = CFrame.new(
+                    hrp.Position,
+                    Vector3.new(
+                        target.Target.X,
+                        hrp.Position.Y,
+                        target.Target.Z
+                    )
                 )
-            )
-        end
+            end
 
-        if ToF_Config.Laser then
-            UpdateLaser(target.Origin, target.Target)
-        elseif ToF_Internal.LaserPart then
-            ToF_Internal.LaserPart.Transparency = 1
-        end
-    end)
+            if ToF_Config.Laser then
+                UpdateLaser(
+                    target.Origin,
+                    target.Target
+                )
+            elseif ToF_State.Laser then
+                ToF_State.Laser.Transparency = 1
+            end
+        end)
 end
 
-local function StopHeartbeat()
-    if ToF_Internal.Connection then
-        ToF_Internal.Connection:Disconnect()
-        ToF_Internal.Connection = nil
+local function StopConnection()
+    if ToF_State.Connection then
+        ToF_State.Connection:Disconnect()
+        ToF_State.Connection = nil
     end
 
-    ToF_Internal.IsAiming = false
+    ToF_State.IsAiming = false
     ClearLaser()
 end
 
@@ -548,10 +654,10 @@ local function SetEnabled(value)
 
     if value then
         StartInput()
-        StartHeartbeat()
+        StartConnection()
     else
         StopInput()
-        StopHeartbeat()
+        StopConnection()
     end
 end
 
@@ -559,25 +665,25 @@ local Window = Fluent:CreateWindow({
     Title = "Violence District",
     SubTitle = "Twist of Fate Rewrite",
     TabWidth = 160,
-    Size = UDim2.fromOffset(500, 360),
+    Size = UDim2.fromOffset(500, 340),
     Acrylic = true,
     Theme = "Dark"
 })
 
 local Tabs = {
-    Aim = Window:AddTab({
+    Combat = Window:AddTab({
         Title = "Combat",
         Icon = "crosshair"
     })
 }
 
-Tabs.Aim:AddToggle("ToF_Enabled", {
+Tabs.Combat:AddToggle("ToF_Enabled", {
     Title = "Enable Silent Aim",
     Default = false,
     Callback = SetEnabled
 })
 
-Tabs.Aim:AddToggle("ToF_Laser", {
+Tabs.Combat:AddToggle("ToF_Laser", {
     Title = "Laser Beam",
     Default = true,
     Callback = function(value)
@@ -589,7 +695,7 @@ Tabs.Aim:AddToggle("ToF_Laser", {
     end
 })
 
-Tabs.Aim:AddToggle("ToF_WallCheck", {
+Tabs.Combat:AddToggle("ToF_WallCheck", {
     Title = "Wall Check",
     Default = false,
     Callback = function(value)
@@ -597,7 +703,7 @@ Tabs.Aim:AddToggle("ToF_WallCheck", {
     end
 })
 
-Tabs.Aim:AddToggle("ToF_BlockKnocked", {
+Tabs.Combat:AddToggle("ToF_BlockKnocked", {
     Title = "Block When Knocked",
     Default = true,
     Callback = function(value)
@@ -605,7 +711,7 @@ Tabs.Aim:AddToggle("ToF_BlockKnocked", {
     end
 })
 
-Tabs.Aim:AddDropdown("ToF_Target", {
+Tabs.Combat:AddDropdown("ToF_TargetMode", {
     Title = "Target Mode",
     Values = {
         "Killer",
@@ -613,23 +719,14 @@ Tabs.Aim:AddDropdown("ToF_Target", {
         "Zombie"
     },
     Default = "Killer",
+    Multi = false,
     Callback = function(value)
-        ToF_Config.TargetMode = value
-    end
-})
-
-Tabs.Aim:AddInput("ToF_Speed", {
-    Title = "Prediction Speed",
-    Default = "400",
-    Placeholder = "400",
-    Numeric = true,
-    Finished = true,
-    Callback = function(value)
-        local speed = tonumber(value)
-
-        if speed and speed > 0 then
-            ToF_Config.Speed = speed
+        if type(value) == "table" then
+            value = value[1]
         end
+
+        ToF_Config.TargetMode =
+            value or "Killer"
     end
 })
 
