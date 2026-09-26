@@ -1,4 +1,4 @@
---3
+--4
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
@@ -217,82 +217,21 @@ local Tabs = {
     Main = Window:AddTab({
         Title = "Main",
         Icon = "eye"
-    }),
-
-    Settings = Window:AddTab({
-        Title = "Settings",
-        Icon = "settings"
     })
 }
-
-Tabs.Main:AddParagraph({
-    Title = "Eddie's Invisible",
-    Content = "Universal Invisibility"
-})
-
-local StatusParagraph = Tabs.Main:AddParagraph({
-    Title = "Status",
-    Content = "Disabled"
-})
 
 local InvisibleToggle = Tabs.Main:AddToggle(
     "InvisibleToggle",
     {
         Title = "Invisibility",
-        Description = "Automatically maintains invisibility",
+        Description = "Enable or disable invisibility",
         Default = false
     }
 )
 
-local function UpdateStatus()
-    pcall(function()
-        if State.Invisible then
-            if State.Running then
-                StatusParagraph:SetDesc("Active")
-            else
-                StatusParagraph:SetDesc("Starting...")
-            end
-        else
-            StatusParagraph:SetDesc("Disabled")
-        end
-    end)
-end
-
 InvisibleToggle:OnChanged(function(Value)
     SetInvisible(Value)
-    UpdateStatus()
 end)
-
-Tabs.Main:AddButton({
-    Title = "Refresh",
-    Description = "Re-scan character parts",
-
-    Callback = function()
-        if Character then
-            collectParts()
-
-            if State.Invisible then
-                applyInvisible()
-            else
-                RestoreCharacter()
-            end
-        end
-
-        UpdateStatus()
-    end
-})
-
-Tabs.Settings:AddParagraph({
-    Title = "Auto System",
-    Content =
-        "Invisibility automatically resumes after respawn and recovers if the engine stops."
-})
-
-Tabs.Settings:AddParagraph({
-    Title = "Controls",
-    Content =
-        "Use the Invisibility toggle above. No keyboard shortcut required."
-})
 
 RunService.Heartbeat:Connect(function()
     if State.Destroyed then
@@ -320,7 +259,6 @@ task.spawn(function()
                 end
 
                 State.LastCycle = os.clock()
-                UpdateStatus()
             end
         end
     end
@@ -357,8 +295,6 @@ LocalPlayer.CharacterAdded:Connect(function(char)
         applyInvisible()
         State.LastCycle = os.clock()
     end
-
-    UpdateStatus()
 end)
 
 collectParts()
@@ -370,7 +306,5 @@ State.LastCycle = 0
 pcall(function()
     InvisibleToggle:SetValue(false)
 end)
-
-UpdateStatus()
 
 print("[Eddie's Invisible] Loaded")
