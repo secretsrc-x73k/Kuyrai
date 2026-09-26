@@ -1,4 +1,4 @@
---2
+--3
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
@@ -108,7 +108,8 @@ end
 
 local function InvisibleCycle()
     if not State.Invisible then
-        return false
+        State.Running = false
+        return
     end
 
     local root =
@@ -120,7 +121,8 @@ local function InvisibleCycle()
         and Character:FindFirstChildOfClass("Humanoid")
 
     if not root or not hum then
-        return false
+        State.Running = false
+        return
     end
 
     local camCF = root.CFrame
@@ -149,8 +151,6 @@ local function InvisibleCycle()
 
     State.LastCycle = os.clock()
     State.Running = true
-
-    return true
 end
 
 local function StartInvisible()
@@ -162,15 +162,18 @@ local function StartInvisible()
         return
     end
 
+    State.Invisible = true
+    State.Running = false
+    State.LastCycle = os.clock()
+
     collectParts()
     applyInvisible()
-
-    State.Invisible = true
 end
 
 local function StopInvisible()
     State.Invisible = false
     State.Running = false
+    State.LastCycle = 0
 
     RestoreCharacter()
 end
@@ -282,13 +285,13 @@ Tabs.Main:AddButton({
 Tabs.Settings:AddParagraph({
     Title = "Auto System",
     Content =
-        "Invisibility automatically resumes after respawn and attempts to recover if the engine stops."
+        "Invisibility automatically resumes after respawn and recovers if the engine stops."
 })
 
 Tabs.Settings:AddParagraph({
-    Title = "Status",
+    Title = "Controls",
     Content =
-        "No keyboard shortcut is required."
+        "Use the Invisibility toggle above. No keyboard shortcut required."
 })
 
 RunService.Heartbeat:Connect(function()
@@ -308,19 +311,30 @@ task.spawn(function()
         task.wait(0.5)
 
         if State.Invisible then
-            local elapsed =
-                os.clock() - State.LastCycle
-
-            if elapsed > 1 then
+            if os.clock() - State.LastCycle > 1 then
                 State.Running = false
 
-                collectParts()
-                applyInvisible()
+                if Character then
+                    collectParts()
+                    applyInvisible()
+                end
 
+                State.LastCycle = os.clock()
                 UpdateStatus()
             end
         end
     end
+end)
+
+LocalPlayer.CharacterRemoving:Connect(function()
+    State.Running = false
+    State.LastCycle = 0
+
+    Character = nil
+    Humanoid = nil
+    HRP = nil
+
+    bodyParts = {}
 end)
 
 LocalPlayer.CharacterAdded:Connect(function(char)
@@ -341,25 +355,17 @@ LocalPlayer.CharacterAdded:Connect(function(char)
 
     if State.Invisible then
         applyInvisible()
-        UpdateStatus()
+        State.LastCycle = os.clock()
     end
-end)
 
-LocalPlayer.CharacterRemoving:Connect(function()
-    State.Running = false
-    State.LastCycle = 0
-
-    Character = nil
-    Humanoid = nil
-    HRP = nil
-
-    bodyParts = {}
+    UpdateStatus()
 end)
 
 collectParts()
 
 State.Invisible = false
 State.Running = false
+State.LastCycle = 0
 
 pcall(function()
     InvisibleToggle:SetValue(false)
