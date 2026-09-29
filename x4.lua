@@ -1,3 +1,28 @@
+local function LoadFluent(url)
+    local ok, result = pcall(function()
+        local loader = load or loadstring
+        if type(loader) ~= "function" then
+            error("load/loadstring is unavailable")
+        end
+        local chunk = loader(game:HttpGet(url))
+        if type(chunk) ~= "function" then
+            error("NewUI response did not compile to a function")
+        end
+        local value = chunk()
+        if type(value) == "function" then
+            value = value()
+        end
+        return value
+    end)
+    if not ok then
+        error("REAPER HUB UI load failed: " .. tostring(result))
+    end
+    if type(result) ~= "table" and type(result) ~= "userdata" then
+        error("REAPER HUB UI load failed: NewUI returned " .. type(result))
+    end
+    return result
+end
+
 local Fluent = LoadFluent("https://raw.githubusercontent.com/secretsrc-x73k/NewUI/refs/heads/main/newui.lua")
 
 local Players = game:GetService("Players")
