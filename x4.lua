@@ -1,28 +1,3 @@
-local function LoadFluent(url)
-    local ok, result = pcall(function()
-        local loader = load or loadstring
-        if type(loader) ~= "function" then
-            error("load/loadstring is unavailable")
-        end
-        local chunk = loader(game:HttpGet(url))
-        if type(chunk) ~= "function" then
-            error("NewUI response did not compile to a function")
-        end
-        local value = chunk()
-        if type(value) == "function" then
-            value = value()
-        end
-        return value
-    end)
-    if not ok then
-        error("REAPER HUB UI load failed: " .. tostring(result))
-    end
-    if type(result) ~= "table" and type(result) ~= "userdata" then
-        error("REAPER HUB UI load failed: NewUI returned " .. type(result))
-    end
-    return result
-end
-
 local Fluent = LoadFluent("https://raw.githubusercontent.com/secretsrc-x73k/NewUI/refs/heads/main/newui.lua")
 
 local Players = game:GetService("Players")
@@ -50,14 +25,6 @@ local KillerTab = Window:AddTab({
 
 local VeilSection = KillerTab:AddSection("Veil Silent Aim")
 
--- =====================================================
--- KILLER: VEIL SPEAR AIMBOT + SILENT AIM
--- Original lines: 5039-5439
--- =====================================================
-
--- =====================================================
--- VEIL AIMBOT (PREDICTION)
--- =====================================================
 VeilConfig = {
     Enabled              = false,
     ShowFOV              = true,
@@ -402,7 +369,7 @@ game:GetService("RunService").RenderStepped:Connect(function()
 end)
 
 VeilSection:AddToggle("Veil_Enabled", {
-    Title = "Enable Silent Aim",
+    Title = "Silent Aim (Veil)",
     Default = VeilConfig.Enabled,
     Callback = function(value)
         VeilConfig.Enabled = value
@@ -429,47 +396,47 @@ VeilSection:AddToggle("Veil_ShowTargetLaser", {
     end,
 })
 
-VeilSection:AddInput("Veil_FOV", {
+VeilSection:AddSlider("Veil_FOV", {
     Title = "FOV",
-    Default = tostring(VeilConfig.FOV),
-    Numeric = true,
-    Finished = true,
+    Default = VeilConfig.FOV,
+    Min = 1,
+    Max = 500,
+    Rounding = 0,
     Callback = function(value)
-        local n = tonumber(value)
-        if n then VeilConfig.FOV = math.max(1, n) end
+        VeilConfig.FOV = value
     end,
 })
 
-VeilSection:AddInput("Veil_SpearSpeed", {
+VeilSection:AddSlider("Veil_SpearSpeed", {
     Title = "Spear Speed",
-    Default = tostring(VeilConfig.SpearSpeed),
-    Numeric = true,
-    Finished = true,
+    Min = 1,
+    Max = 500,
+    Default = VeilConfig.SpearSpeed,
+    Rounding = 0,
     Callback = function(value)
-        local n = tonumber(value)
-        if n and n > 0 then VeilConfig.SpearSpeed = n end
+        VeilConfig.SpearSpeed = value
     end,
 })
 
-VeilSection:AddInput("Veil_Gravity", {
+VeilSection:AddSlider("Veil_Gravity", {
     Title = "Gravity",
-    Default = tostring(VeilConfig.Gravity),
-    Numeric = true,
-    Finished = true,
+    Min = 0,
+    Max = 300,
+    Default = VeilConfig.Gravity,
+    Rounding = 1,
     Callback = function(value)
-        local n = tonumber(value)
-        if n and n >= 0 then VeilConfig.Gravity = n end
+        VeilConfig.Gravity = value
     end,
 })
 
-VeilSection:AddInput("Veil_MaxDist", {
+VeilSection:AddSlider("Veil_MaxDist", {
     Title = "Max Distance",
-    Default = tostring(VeilConfig.MaxDist),
-    Numeric = true,
-    Finished = true,
+    Min = 1,
+    Max = 500,
+    Default = VeilConfig.MaxDist,
+    Rounding = 0,
     Callback = function(value)
-        local n = tonumber(value)
-        if n and n > 0 then VeilConfig.MaxDist = n end
+        VeilConfig.MaxDist = value
     end,
 })
 
@@ -490,14 +457,14 @@ VeilSection:AddDropdown("Veil_TargetPart", {
     end,
 })
 
-VeilSection:AddInput("Veil_HorizontalPredict", {
+VeilSection:AddSlider("Veil_HorizontalPredict", {
     Title = "Horizontal Predict Factor",
-    Default = tostring(VeilConfig.HorizontalPredictFactor),
-    Numeric = true,
-    Finished = true,
+    Min = 0,
+    Max = 3,
+    Default = VeilConfig.HorizontalPredictFactor,
+    Rounding = 2,
     Callback = function(value)
-        local n = tonumber(value)
-        if n then VeilConfig.HorizontalPredictFactor = n end
+        VeilConfig.HorizontalPredictFactor = value
     end,
 })
 
