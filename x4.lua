@@ -44,7 +44,6 @@ local Window = Fluent:CreateWindow({
     MinimizeKey = Enum.KeyCode.RightControl
 })
 
-
 local function VD_Notify(title, content, duration)
     pcall(function()
         Fluent:Notify({
@@ -55,14 +54,28 @@ local function VD_Notify(title, content, duration)
     end)
 end
 
+VD.AimLockMaxDistance = VD.AimLockMaxDistance or 50
+VD.KILLER_SilentAimFlask = VD.KILLER_SilentAimFlask or false
+VD.TOF_SilentAim = VD.TOF_SilentAim or false
+VD.TOF_TargetMode = VD.TOF_TargetMode or "Killer"
+VD.TOF_WallCheck = VD.TOF_WallCheck ~= false
+VD.TOF_BlockKnocked = VD.TOF_BlockKnocked ~= false
+VD.TOF_Laser = VD.TOF_Laser or false
+VD.FLASH_SilentAim = VD.FLASH_SilentAim or false
+VD.FLASH_TargetPart = VD.FLASH_TargetPart or "Head"
+VD.FLASH_Range = VD.FLASH_Range or 120
+VD.FLASH_Smooth = VD.FLASH_Smooth or 0.35
+VD.FLASH_Laser = VD.FLASH_Laser or false
+VD.AIM_Enabled = VD.AIM_Enabled or false
+VD.AIM_UseRMB = VD.AIM_UseRMB or false
+VD.AIM_VisCheck = VD.AIM_VisCheck or false
+VD.AIM_Predict = VD.AIM_Predict or false
+VD.AIM_Smooth = VD.AIM_Smooth or 0.3
+
 do
 local VD_AimLockState = {
     Active = false,
     CurrentTarget = nil,
-    ButtonGui = nil,
-    Button = nil,
-    ButtonLabel = nil,
-    SyncingUI = false,
 }
 
 local function VD_AimLock_IsSurvivor(p)
@@ -107,53 +120,13 @@ local function VD_AimLock_GetClosest()
     return bestTarget
 end
 
-local function VD_RefreshAimLockButton()
-    local btn = VD_AimLockState.Button
-    if not (btn and btn.Parent) then return end
-    btn.BackgroundColor3 = VD_AimLockState.Active and Color3.fromRGB(185, 50, 50) or Color3.fromRGB(20, 0, 30)
-    local label = VD_AimLockState.ButtonLabel
-    if label and label.Parent then
-        label.Text = VD_AimLockState.Active and "ON" or "OFF"
-        label.TextColor3 = VD_AimLockState.Active and Color3.fromRGB(255, 200, 200) or Color3.fromRGB(255, 255, 255)
-    end
-end
-
 local function VD_SetAimLockActive(state)
     VD_AimLockState.Active = state and true or false
     if not VD_AimLockState.Active then
         VD_AimLockState.CurrentTarget = nil
     end
-    VD_RefreshAimLockButton()
 end
 getgenv().VD_SetAimLockActive = VD_SetAimLockActive
-
-local function VD_DestroyAimLockButton()
-    VD_AimLockState.ButtonGui = nil
-    VD_AimLockState.Button = nil
-    VD_AimLockState.ButtonLabel = nil
-end
-
-local function VD_CreateAimLockButton()
-    VD_RefreshAimLockButton()
-end
-
-local function VD_SetAimLockButtonVisible(state)
-    VD.AimLockButton = state and true or false
-    if VD.AimLockButton then
-        VD_CreateAimLockButton()
-    else
-        VD_SetAimLockActive(false)
-        VD_DestroyAimLockButton()
-    end
-end
-getgenv().VD_SetAimLockButtonVisible = VD_SetAimLockButtonVisible
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.B and VD.AimLockButton then
-        VD_SetAimLockActive(not VD_AimLockState.Active)
-    end
-end)
 
 LocalPlayer.CharacterAdded:Connect(function()
     if VD_AimLockState.Active then
@@ -162,17 +135,8 @@ LocalPlayer.CharacterAdded:Connect(function()
     VD_AimLockState.CurrentTarget = nil
 end)
 
-task.spawn(function()
-    while getgenv().VD and not getgenv().VD.Destroyed do
-        if not VD.AimLockButton then
-            VD_AimLockState.CurrentTarget = nil
-        end
-        task.wait(3)
-    end
-end)
-
 RunService.RenderStepped:Connect(function()
-    if not VD_AimLockState.Active or not VD.AimLockButton then
+    if not VD_AimLockState.Active then
         VD_AimLockState.CurrentTarget = nil
         return
     end
@@ -189,7 +153,7 @@ RunService.RenderStepped:Connect(function()
         cam.CFrame = CFrame.new(cam.CFrame.Position, targetPart.Position)
     end)
 end)
-end -- end AimLock scope
+end
 
 VeilConfig = {
     Enabled              = false,
@@ -311,8 +275,6 @@ function veil_setupInterceptor()
             oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 local args = {...}
                 local method = getnamecallmethod()
-                _genv = getgenv()
-                _genv.KYS_oldNamecall = oldNamecall
                 if not checkcaller() then
                     if string.lower(method) == "kick" then
                         return nil
@@ -349,38 +311,40 @@ function veil_setupInterceptor()
                     end
 
                     if method == "FireServer" then
-                        if VD.KILLER_SilentAimFlask then
-                            local ok, name = pcall(function() return self.Name end)
-                            if ok and name == "ThrowFlask" then
-                                local args = {...}
-                                local closest = nil
-                                local minDst = math.huge
-                                local lp = game:GetService("Players").LocalPlayer
-                                local myPos = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") and lp.Character.HumanoidRootPart.Position
-                                if myPos then
-                                    for _, v in pairs(game:GetService("Players"):GetPlayers()) do
-                                        if v ~= lp and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
-                                            if not v.Character:GetAttribute("IsKiller") then
-                                                local dst = (v.Character.HumanoidRootPart.Position - myPos).Magnitude
-                                                if dst < minDst then
-                                                    minDst = dst
-                                                    closest = v
-                                                end
-                                            end
+
+                if VD.KILLER_SilentAimFlask and method == "FireServer" then
+                    local ok, name = pcall(function() return self.Name end)
+                    if ok and name == "ThrowFlask" then
+                        local args = {...}
+                        local closest = nil
+                        local minDst = math.huge
+                        local lp = game:GetService("Players").LocalPlayer
+                        local myPos = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") and lp.Character.HumanoidRootPart.Position
+
+                        if myPos then
+                            for _, v in pairs(game:GetService("Players"):GetPlayers()) do
+                                if v ~= lp and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
+                                    if not v.Character:GetAttribute("IsKiller") then
+                                        local dst = (v.Character.HumanoidRootPart.Position - myPos).Magnitude
+                                        if dst < minDst then
+                                            minDst = dst
+                                            closest = v
                                         end
                                     end
-                                end
-                                if closest then
-                                    local targetPos = closest.Character.HumanoidRootPart.Position
-                                    if args[2] and typeof(args[2]) == "Vector3" then
-                                        args[1] = (targetPos - args[2]).Unit
-                                    end
-                                    setnamecallmethod(method)
-                                    return _genv.KYS_oldNamecall(self, unpack(args))
                                 end
                             end
                         end
 
+                        if closest then
+                            local targetPos = closest.Character.HumanoidRootPart.Position
+                            if args[2] and typeof(args[2]) == "Vector3" then
+                                args[1] = (targetPos - args[2]).Unit
+                            end
+
+                            setnamecallmethod(method)
+                            return _genv.KYS_oldNamecall(self, unpack(args))
+                        end
+                    end
                         if self.Name == "Spearthrow" and VeilConfig.Enabled then
                             return nil
                         end
@@ -624,32 +588,6 @@ game:GetService("RunService").RenderStepped:Connect(function()
     end
 end)
 
-VD = getgenv().VD or VD or {}
-getgenv().VD = VD
-VD.AimLockMaxDistance = VD.AimLockMaxDistance or 50
-VD.AimLockButton = VD.AimLockButton or false
-VD.KILLER_SilentAimFlask = VD.KILLER_SilentAimFlask or false
-
-local KillerTab = Window:AddTab({Title = "Killer", Icon = "target"})
-local KillerAimLockSection = KillerTab:AddSection("Aim Lock")
-KillerAimLockSection:AddToggle("Killer_AimLock", {Title="Aim Lock", Description="Lock camera onto the closest alive Survivor.", Default=false, Callback=function(value) VD_SetAimLockButtonVisible(value); VD_SetAimLockActive(value) end})
-KillerAimLockSection:AddInput("Killer_AimLockDistance", {Title="Max Distance", Description="Maximum Aim Lock target distance.", Default=tostring(VD.AimLockMaxDistance), Placeholder="50", Callback=function(value) local n=tonumber(value); if n then VD.AimLockMaxDistance=math.max(1,n) end end})
-
-local VeilSection = KillerTab:AddSection("Veil Spear")
-VeilSection:AddToggle("Killer_VeilEnabled", {Title="Veil Silent Aim", Description="Enable Veil spear target selection and silent fire.", Default=VeilConfig.Enabled, Callback=function(v) VeilConfig.Enabled=v end})
-VeilSection:AddToggle("Killer_VeilFOV", {Title="Show FOV", Description="Show the Veil FOV circle.", Default=VeilConfig.ShowFOV, Callback=function(v) VeilConfig.ShowFOV=v end})
-VeilSection:AddToggle("Killer_VeilLaser", {Title="Show Target Laser", Description="Show the target laser while charging.", Default=VeilConfig.ShowTargetLaser, Callback=function(v) VeilConfig.ShowTargetLaser=v end})
-VeilSection:AddToggle("Killer_VeilPredict", {Title="Auto Prediction", Description="Enable horizontal prediction and automatic gravity calculation.", Default=VeilConfig.AutoPredict, Callback=function(v) VeilConfig.AutoPredict=v end})
-VeilSection:AddDropdown("Killer_VeilTargetPart", {Title="Target Part", Description="Part used by Veil target selection.", Values={"Torso","Head","Root"}, Multi=false, Default=VeilConfig.TargetPart, Callback=function(v) VeilConfig.TargetPart=type(v)=="table" and v[1] or v end})
-VeilSection:AddInput("Killer_VeilFOV", {Title="FOV", Description="Screen-space target radius.", Default=tostring(VeilConfig.FOV), Placeholder="150", Callback=function(v) local n=tonumber(v); if n then VeilConfig.FOV=math.max(1,n) end end})
-VeilSection:AddInput("Killer_VeilSpeed", {Title="Spear Speed", Description="Projectile speed used for prediction.", Default=tostring(VeilConfig.SpearSpeed), Placeholder="165", Callback=function(v) local n=tonumber(v); if n then VeilConfig.SpearSpeed=math.max(1,n) end end})
-VeilSection:AddInput("Killer_VeilGravity", {Title="Gravity", Description="Gravity when Auto Prediction is disabled.", Default=tostring(VeilConfig.Gravity), Placeholder="80", Callback=function(v) local n=tonumber(v); if n then VeilConfig.Gravity=n end end})
-VeilSection:AddInput("Killer_VeilMaxDist", {Title="Max Distance", Description="Maximum 3D target distance.", Default=tostring(VeilConfig.MaxDist), Placeholder="200", Callback=function(v) local n=tonumber(v); if n then VeilConfig.MaxDist=math.max(1,n) end end})
-VeilSection:AddInput("Killer_VeilPredictFactor", {Title="Horizontal Predict Factor", Description="Horizontal prediction multiplier.", Default=tostring(VeilConfig.HorizontalPredictFactor), Placeholder="1.0", Callback=function(v) local n=tonumber(v); if n then VeilConfig.HorizontalPredictFactor=n end end})
-
-local FlaskSection = KillerTab:AddSection("Flask")
-FlaskSection:AddToggle("Killer_FlaskSilentAim", {Title="Flask Silent Aim", Description="Enable the original ThrowFlask target redirection.", Default=VD.KILLER_SilentAimFlask, Callback=function(v) VD.KILLER_SilentAimFlask=v end})
-
 (function()
 local KYS_ToFState = {
     Connection = nil,
@@ -663,7 +601,6 @@ local KYS_ToFState = {
     SCPCache = {},
     SCPCacheTimer = 0,
 }
-
 
 local function KYS_ToFGetEvent()
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -954,37 +891,10 @@ local function KYS_ToFDoShoot()
     end)
 end
 
-local KYS_ToFModeButtons = {}
-local function KYS_ToFRefreshTargetButtons()
-    local modes = {
-        Killer = { Color3.fromRGB(180, 45, 45), Color3.fromRGB(255, 180, 180) },
-        Survivors = { Color3.fromRGB(25, 80, 150), Color3.fromRGB(160, 210, 255) },
-        Zombie = { Color3.fromRGB(120, 80, 10), Color3.fromRGB(255, 210, 100) },
-    }
-
-    for modeName, btn in pairs(KYS_ToFModeButtons) do
-        if btn and btn.Parent then
-            local active = modeName == (VD.TOF_TargetMode or "Killer")
-            local colors = modes[modeName]
-            btn.BackgroundColor3 = active and colors[1] or Color3.fromRGB(30, 32, 40)
-            btn.TextColor3 = active and colors[2] or Color3.fromRGB(155, 160, 175)
-        end
-    end
-end
-
 local function KYS_ToFSetTargetMode(modeName, notify)
     if modeName ~= "Killer" and modeName ~= "Survivors" and modeName ~= "Zombie" then return end
     VD.TOF_TargetMode = modeName
-    KYS_ToFRefreshTargetButtons()
     if notify then VD_Notify("Target Mode", modeName, 1) end
-end
-
-local function KYS_ToFCreateTargetSelectorUI()
-end
-
-local function KYS_ToFDestroyTargetSelectorUI()
-    KYS_ToFState.TargetGui = nil
-    KYS_ToFModeButtons = {}
 end
 
 local function KYS_ToFStartConnection()
@@ -1038,7 +948,6 @@ local function KYS_ToFEnsureInputs()
     if not KYS_ToFState.InputBegan then
         KYS_ToFState.InputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
             if gameProcessed then return end
-
             if not VD.TOF_SilentAim then return end
             if input.UserInputType == Enum.UserInputType.MouseButton1
             or (input.UserInputType == Enum.UserInputType.Touch and KYS_ToFIsTouchOnShootButton(input)) then
@@ -1047,7 +956,6 @@ local function KYS_ToFEnsureInputs()
                     KYS_ToFState.TouchInput = input
                 end
                 KYS_ToFDoShoot()
-                return
             end
         end)
     end
@@ -1067,10 +975,8 @@ KYS_SetToFSilentAim = function(enabled)
     VD.TOF_SilentAim = enabled and true or false
     KYS_ToFEnsureInputs()
     if VD.TOF_SilentAim then
-        KYS_ToFCreateTargetSelectorUI()
         KYS_ToFStartConnection()
     else
-        KYS_ToFDestroyTargetSelectorUI()
         KYS_ToFStopConnection()
     end
 end
@@ -1293,7 +1199,6 @@ getgenv().KYS_SetFlashlightAimActive = function(active, flashlightPart)
     end
 end
 getgenv().KYS_FlashlightActivateRemote = KYS_GetFlashlightActivateRemote()
-end)();
 
 local Aimbot = {}
 local State  = { AimTarget = nil, AimHolding = false }
@@ -1369,215 +1274,79 @@ function Aimbot.Update(cam, screenSize, screenCenter)
     end
 end
 
-VD = getgenv().VD or VD or {}
-getgenv().VD = VD
-
-VD.TOF_SilentAim = VD.TOF_SilentAim or false
-VD.TOF_TargetMode = VD.TOF_TargetMode or "Killer"
-VD.TOF_WallCheck = VD.TOF_WallCheck ~= false
-VD.TOF_BlockKnocked = VD.TOF_BlockKnocked ~= false
-VD.TOF_Laser = VD.TOF_Laser or false
-
-VD.FLASH_SilentAim = VD.FLASH_SilentAim or false
-VD.FLASH_TargetPart = VD.FLASH_TargetPart or "Head"
-VD.FLASH_Range = VD.FLASH_Range or 120
-VD.FLASH_Smooth = VD.FLASH_Smooth or 0.35
-VD.FLASH_Laser = VD.FLASH_Laser or false
-
-VD.AIM_Enabled = VD.AIM_Enabled or false
-VD.AIM_UseRMB = VD.AIM_UseRMB or false
-VD.AIM_VisCheck = VD.AIM_VisCheck or false
-VD.AIM_Predict = VD.AIM_Predict or false
-VD.AIM_Smooth = VD.AIM_Smooth or 0.3
-
-local SurvivorTab = Window:AddTab({
-    Title = "Survivor",
-    Icon = "crosshair",
+local KillerTab = Window:AddTab({Title = "Killer", Icon = "target"})
+local KillerAimLockSection = KillerTab:AddSection("Aim Lock")
+KillerAimLockSection:AddToggle("Killer_AimLock", {
+    Title = "Aim Lock",
+    Description = "Lock camera onto the closest alive Survivor.",
+    Default = VD_AimLockState.Active,
+    Callback = function(value)
+        VD_SetAimLockActive(value)
+    end,
+})
+KillerAimLockSection:AddInput("Killer_AimLockDistance", {
+    Title = "Max Distance",
+    Description = "Maximum Aim Lock target distance.",
+    Default = tostring(VD.AimLockMaxDistance),
+    Placeholder = "50",
+    Callback = function(value)
+        local n = tonumber(value)
+        if n then VD.AimLockMaxDistance = math.max(1, n) end
+    end,
 })
 
+local VeilSection = KillerTab:AddSection("Veil Spear")
+VeilSection:AddToggle("Killer_VeilEnabled", {Title="Veil Silent Aim", Description="Enable Veil spear target selection and silent fire.", Default=VeilConfig.Enabled, Callback=function(v) VeilConfig.Enabled=v end})
+VeilSection:AddToggle("Killer_VeilFOV", {Title="Show FOV", Description="Show the Veil FOV circle.", Default=VeilConfig.ShowFOV, Callback=function(v) VeilConfig.ShowFOV=v end})
+VeilSection:AddToggle("Killer_VeilLaser", {Title="Show Target Laser", Description="Show the target laser while charging.", Default=VeilConfig.ShowTargetLaser, Callback=function(v) VeilConfig.ShowTargetLaser=v end})
+VeilSection:AddToggle("Killer_VeilPredict", {Title="Auto Prediction", Description="Enable horizontal prediction and automatic gravity calculation.", Default=VeilConfig.AutoPredict, Callback=function(v) VeilConfig.AutoPredict=v end})
+VeilSection:AddDropdown("Killer_VeilTargetPart", {Title="Target Part", Description="Part used by Veil target selection.", Values={"Torso","Head","Root"}, Multi=false, Default=VeilConfig.TargetPart, Callback=function(v) VeilConfig.TargetPart=type(v)=="table" and v[1] or v end})
+VeilSection:AddInput("Killer_VeilFOV", {Title="FOV", Description="Screen-space target radius.", Default=tostring(VeilConfig.FOV), Placeholder="150", Callback=function(v) local n=tonumber(v); if n then VeilConfig.FOV=math.max(1,n) end end})
+VeilSection:AddInput("Killer_VeilSpeed", {Title="Spear Speed", Description="Projectile speed used for prediction.", Default=tostring(VeilConfig.SpearSpeed), Placeholder="165", Callback=function(v) local n=tonumber(v); if n then VeilConfig.SpearSpeed=math.max(1,n) end end})
+VeilSection:AddInput("Killer_VeilGravity", {Title="Gravity", Description="Gravity when Auto Prediction is disabled.", Default=tostring(VeilConfig.Gravity), Placeholder="80", Callback=function(v) local n=tonumber(v); if n then VeilConfig.Gravity=n end end})
+VeilSection:AddInput("Killer_VeilMaxDist", {Title="Max Distance", Description="Maximum 3D target distance.", Default=tostring(VeilConfig.MaxDist), Placeholder="200", Callback=function(v) local n=tonumber(v); if n then VeilConfig.MaxDist=math.max(1,n) end end})
+VeilSection:AddInput("Killer_VeilPredictFactor", {Title="Horizontal Predict Factor", Description="Horizontal prediction multiplier.", Default=tostring(VeilConfig.HorizontalPredictFactor), Placeholder="1.0", Callback=function(v) local n=tonumber(v); if n then VeilConfig.HorizontalPredictFactor=n end end})
+
+local FlaskSection = KillerTab:AddSection("Flask")
+FlaskSection:AddToggle("Killer_FlaskSilentAim", {Title="Flask Silent Aim", Description="Enable the original ThrowFlask target redirection.", Default=VD.KILLER_SilentAimFlask, Callback=function(v) VD.KILLER_SilentAimFlask=v end})
+
+local SurvivorTab = Window:AddTab({Title="Survivor", Icon="crosshair"})
 local ToFSection = SurvivorTab:AddSection("Twist of Fate")
-
-ToFSection:AddToggle("Survivor_ToFSilentAim", {
-    Title = "Twist of Fate Silent Aim",
-    Description = "Enable the original Twist of Fate silent aim.",
-    Default = VD.TOF_SilentAim,
-    Callback = function(value)
-        KYS_SetToFSilentAim(value)
-    end,
-})
-
-ToFSection:AddDropdown("Survivor_ToFTargetMode", {
-    Title = "Target Mode",
-    Description = "Killer, Survivors, or Zombie.",
-    Values = {"Killer", "Survivors", "Zombie"},
-    Multi = false,
-    Default = VD.TOF_TargetMode,
-    Callback = function(value)
-        value = type(value) == "table" and value[1] or value
-        KYS_ToFSetTargetMode(value, false)
-    end,
-})
-
-ToFSection:AddToggle("Survivor_ToFWallCheck", {
-    Title = "Wall Check",
-    Description = "Use the source visibility check.",
-    Default = VD.TOF_WallCheck,
-    Callback = function(value)
-        VD.TOF_WallCheck = value
-    end,
-})
-
-ToFSection:AddToggle("Survivor_ToFBlockKnocked", {
-    Title = "Block Knocked",
-    Description = "Block downed/dead targets according to the source settings.",
-    Default = VD.TOF_BlockKnocked,
-    Callback = function(value)
-        VD.TOF_BlockKnocked = value
-    end,
-})
-
-ToFSection:AddToggle("Survivor_ToFLaser", {
-    Title = "Laser",
-    Description = "Show the Twist of Fate target laser.",
-    Default = VD.TOF_Laser,
-    Callback = function(value)
-        VD.TOF_Laser = value
-    end,
-})
-
+ToFSection:AddToggle("Survivor_ToFSilentAim", {Title="Twist of Fate Silent Aim", Description="Enable the original Twist of Fate silent aim.", Default=VD.TOF_SilentAim, Callback=function(value) KYS_SetToFSilentAim(value) end})
+ToFSection:AddDropdown("Survivor_ToFTargetMode", {Title="Target Mode", Description="Killer, Survivors, or Zombie.", Values={"Killer","Survivors","Zombie"}, Multi=false, Default=VD.TOF_TargetMode, Callback=function(value) value=type(value)=="table" and value[1] or value; KYS_ToFSetTargetMode(value,false) end})
+ToFSection:AddToggle("Survivor_ToFWallCheck", {Title="Wall Check", Description="Use the source visibility check.", Default=VD.TOF_WallCheck, Callback=function(value) VD.TOF_WallCheck=value end})
+ToFSection:AddToggle("Survivor_ToFBlockKnocked", {Title="Block Knocked", Description="Block downed/dead targets according to the source settings.", Default=VD.TOF_BlockKnocked, Callback=function(value) VD.TOF_BlockKnocked=value end})
+ToFSection:AddToggle("Survivor_ToFLaser", {Title="Laser", Description="Show the Twist of Fate target laser.", Default=VD.TOF_Laser, Callback=function(value) VD.TOF_Laser=value end})
 
 local FlashlightSection = SurvivorTab:AddSection("Flashlight")
-
-FlashlightSection:AddToggle("Survivor_FlashlightSilentAim", {
-    Title = "Flashlight Silent Aim",
-    Description = "Enable the original flashlight silent aim.",
-    Default = VD.FLASH_SilentAim,
-    Callback = function(value)
-        KYS_SetFlashlightSilentAim(value)
-    end,
-})
-
-FlashlightSection:AddDropdown("Survivor_FlashlightTargetPart", {
-    Title = "Target Part",
-    Description = "Preferred target body part.",
-    Values = {"Head", "UpperTorso", "Torso", "HumanoidRootPart"},
-    Multi = false,
-    Default = VD.FLASH_TargetPart,
-    Callback = function(value)
-        VD.FLASH_TargetPart = type(value) == "table" and value[1] or value
-    end,
-})
-
-FlashlightSection:AddInput("Survivor_FlashlightRange", {
-    Title = "Range",
-    Description = "Maximum flashlight target range.",
-    Default = tostring(VD.FLASH_Range),
-    Placeholder = "120",
-    Callback = function(value)
-        local number = tonumber(value)
-        if number then
-            VD.FLASH_Range = math.max(1, number)
-        end
-    end,
-})
-
-FlashlightSection:AddInput("Survivor_FlashlightSmooth", {
-    Title = "Smooth",
-    Description = "Camera interpolation amount.",
-    Default = tostring(VD.FLASH_Smooth),
-    Placeholder = "0.35",
-    Callback = function(value)
-        local number = tonumber(value)
-        if number then
-            VD.FLASH_Smooth = math.clamp(number, 0.05, 1)
-        end
-    end,
-})
-
-FlashlightSection:AddToggle("Survivor_FlashlightLaser", {
-    Title = "Laser",
-    Description = "Show the flashlight target laser.",
-    Default = VD.FLASH_Laser,
-    Callback = function(value)
-        VD.FLASH_Laser = value
-    end,
-})
+FlashlightSection:AddToggle("Survivor_FlashlightSilentAim", {Title="Flashlight Silent Aim", Description="Enable the original flashlight silent aim.", Default=VD.FLASH_SilentAim, Callback=function(value) KYS_SetFlashlightSilentAim(value); getgenv().KYS_SetFlashlightAimActive(value) end})
+FlashlightSection:AddDropdown("Survivor_FlashlightTargetPart", {Title="Target Part", Description="Preferred target body part.", Values={"Head","UpperTorso","Torso","HumanoidRootPart"}, Multi=false, Default=VD.FLASH_TargetPart, Callback=function(value) VD.FLASH_TargetPart=type(value)=="table" and value[1] or value end})
+FlashlightSection:AddInput("Survivor_FlashlightRange", {Title="Range", Description="Maximum flashlight target range.", Default=tostring(VD.FLASH_Range), Placeholder="120", Callback=function(value) local number=tonumber(value); if number then VD.FLASH_Range=math.max(1,number) end end})
+FlashlightSection:AddInput("Survivor_FlashlightSmooth", {Title="Smooth", Description="Camera interpolation amount.", Default=tostring(VD.FLASH_Smooth), Placeholder="0.35", Callback=function(value) local number=tonumber(value); if number then VD.FLASH_Smooth=math.clamp(number,0.05,1) end end})
+FlashlightSection:AddToggle("Survivor_FlashlightLaser", {Title="Laser", Description="Show the flashlight target laser.", Default=VD.FLASH_Laser, Callback=function(value) VD.FLASH_Laser=value end})
 
 local AimbotSection = SurvivorTab:AddSection("Camera Aimbot")
+AimbotSection:AddToggle("Survivor_AimbotEnabled", {Title="Camera Aimbot", Description="Enable the source camera-aim state.", Default=VD.AIM_Enabled, Callback=function(value) VD.AIM_Enabled=value end})
+AimbotSection:AddToggle("Survivor_AimbotRMB", {Title="Use RMB", Description="Only aim while the source AimHolding state is active.", Default=VD.AIM_UseRMB, Callback=function(value) VD.AIM_UseRMB=value end})
+AimbotSection:AddToggle("Survivor_AimbotVisCheck", {Title="Visibility Check", Description="Use the source raycast visibility check.", Default=VD.AIM_VisCheck, Callback=function(value) VD.AIM_VisCheck=value end})
+AimbotSection:AddToggle("Survivor_AimbotPrediction", {Title="Prediction", Description="Predict target position from AssemblyLinearVelocity.", Default=VD.AIM_Predict, Callback=function(value) VD.AIM_Predict=value end})
+AimbotSection:AddInput("Survivor_AimbotSmooth", {Title="Smooth", Description="Camera interpolation amount.", Default=tostring(VD.AIM_Smooth), Placeholder="0.3", Callback=function(value) local number=tonumber(value); if number then VD.AIM_Smooth=math.clamp(number,0.01,1) end end})
 
-AimbotSection:AddToggle("Survivor_AimbotEnabled", {
-    Title = "Camera Aimbot",
-    Description = "Enable the source camera-aim state.",
-    Default = VD.AIM_Enabled,
-    Callback = function(value)
-        VD.AIM_Enabled = value
-    end,
-})
-
-AimbotSection:AddToggle("Survivor_AimbotRMB", {
-    Title = "Use RMB",
-    Description = "Only aim while the source AimHolding state is active.",
-    Default = VD.AIM_UseRMB,
-    Callback = function(value)
-        VD.AIM_UseRMB = value
-    end,
-})
-
-AimbotSection:AddToggle("Survivor_AimbotVisCheck", {
-    Title = "Visibility Check",
-    Description = "Use the source raycast visibility check.",
-    Default = VD.AIM_VisCheck,
-    Callback = function(value)
-        VD.AIM_VisCheck = value
-    end,
-})
-
-AimbotSection:AddToggle("Survivor_AimbotPrediction", {
-    Title = "Prediction",
-    Description = "Predict target position from AssemblyLinearVelocity.",
-    Default = VD.AIM_Predict,
-    Callback = function(value)
-        VD.AIM_Predict = value
-    end,
-})
-
-AimbotSection:AddInput("Survivor_AimbotSmooth", {
-    Title = "Smooth",
-    Description = "Camera interpolation amount.",
-    Default = tostring(VD.AIM_Smooth),
-    Placeholder = "0.3",
-    Callback = function(value)
-        local number = tonumber(value)
-        if number then
-            VD.AIM_Smooth = math.clamp(number, 0.01, 1)
-        end
-    end,
-})
-
-local AimbotInputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton2 then
-        State.AimHolding = true
-    end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then State.AimHolding=true end
 end)
-
-local AimbotInputEnded = UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton2 then
-        State.AimHolding = false
-    end
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then State.AimHolding=false end
 end)
-
-local AimbotConnection = RunService.RenderStepped:Connect(function()
+RunService.RenderStepped:Connect(function()
     Root = GetRoot()
     Aimbot.Update(workspace.CurrentCamera, workspace.CurrentCamera.ViewportSize, workspace.CurrentCamera.ViewportSize / 2)
 end)
 
-
 if game.CoreGui:FindFirstChild("ToggleUI") then
     game.CoreGui.ToggleUI:Destroy()
 end
-
-
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "ToggleUI"
@@ -1585,7 +1354,6 @@ gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.DisplayOrder = 999999
 gui.Parent = game.CoreGui
-
 
 local border = Instance.new("Frame")
 border.Parent = gui
@@ -1598,13 +1366,11 @@ local borderCorner = Instance.new("UICorner")
 borderCorner.CornerRadius = UDim.new(0,14)
 borderCorner.Parent = border
 
-
 local button = Instance.new("ImageButton")
 button.Parent = gui
 button.Size = UDim2.new(0,60,0,60)
 button.Position = UDim2.new(0,60,0.2,0)
 button.AnchorPoint = Vector2.new(0,0)
-
 button.BackgroundTransparency = 1
 button.ZIndex = 999999
 button.AutoButtonColor = false
@@ -1615,77 +1381,42 @@ corner.Parent = button
 
 local imgOn = "rbxassetid://86279908104891"
 local imgOff = "rbxassetid://86279908104891"
-
 button.Image = imgOn
 button.ScaleType = Enum.ScaleType.Fit
 
-
 local function UpdateBorder()
-
     local offset = (border.Size.X.Offset - button.Size.X.Offset) / 2
-
-    border.Position = UDim2.new(
-        button.Position.X.Scale,
-        button.Position.X.Offset - offset,
-        button.Position.Y.Scale,
-        button.Position.Y.Offset - offset
-    )
+    border.Position = UDim2.new(button.Position.X.Scale, button.Position.X.Offset - offset, button.Position.Y.Scale, button.Position.Y.Offset - offset)
 end
-
 UpdateBorder()
-
 
 local dragging = false
 local dragStart, startPos
-
 button.InputBegan:Connect(function(input)
-
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
-
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
         dragStart = input.Position
         startPos = button.Position
     end
 end)
-
-UIS.InputChanged:Connect(function(input)
-
+UserInputService.InputChanged:Connect(function(input)
     if dragging then
-
         local delta = input.Position - dragStart
-
-        button.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
-        )
-
+        button.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         UpdateBorder()
     end
 end)
-
-UIS.InputEnded:Connect(function(input)
-
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
-
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = false
     end
 end)
 
-
 local isOpen = true
-
 button.MouseButton1Click:Connect(function()
-
     isOpen = not isOpen
-
     if Window then
         Window:Minimize(not isOpen)
     end
-
     button.Image = isOpen and imgOff or imgOn
-
 end)
