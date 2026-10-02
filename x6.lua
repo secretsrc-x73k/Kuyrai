@@ -1,8 +1,8 @@
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 
 local Window = Fluent:CreateWindow({
-    Title = "HyperX | Weather Engine",
-    SubTitle = "Violence District Edition",
+    Title = "HyperX | Weather Engine (Original Logic)",
+    SubTitle = "Violence District",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
     Acrylic = true,
@@ -17,18 +17,19 @@ local Tabs = {
 -- // Services
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- // Original Lighting Backup
+-- // [BACKUP ORIGINAL] เก็บค่าดั้งเดิมไว้ตาม Codex
 local originalLighting = {
     Brightness = Lighting.Brightness,
     ClockTime = Lighting.ClockTime,
     FogEnd = Lighting.FogEnd,
     FogStart = Lighting.FogStart,
+    GlobalShadows = Lighting.GlobalShadows,
     OutdoorAmbient = Lighting.OutdoorAmbient
 }
 
--- // Weather Presets (Exact Logic from Codex)
+-- // [PRESETS] ดึงมาจากตาราง KYS_WeatherPresets ใน Codex เป๊ะๆ
 local KYS_WeatherPresets = {
     ["Default"] = {},
     ["Christmas (Snow)"] = {
@@ -75,74 +76,105 @@ local KYS_WeatherPresets = {
     }
 }
 
--- // Core Logic: Weather Functions
-local function CleanupWeather()
-    if getgenv().VD_ParticleAnchor then getgenv().VD_ParticleAnchor:Destroy(); getgenv().VD_ParticleAnchor = nil end
-    if getgenv().VD_WeatherCC then getgenv().VD_WeatherCC:Destroy(); getgenv().VD_WeatherCC = nil end
-    if getgenv().VD_WeatherAtmosphere then getgenv().VD_WeatherAtmosphere:Destroy(); getgenv().VD_WeatherAtmosphere = nil end
-end
-
+-- // [CORE FUNCTION] VD_ApplyWeather (Exact Copy from Codex)
 local function ApplyWeather(themeName)
-    local theme = KYS_WeatherPresets[themeName]
-    CleanupWeather()
+    local theme = KYS_WeatherPresets[themeName] or KYS_WeatherPresets["Default"]
     
-    if themeName == "Default" then
-        Lighting.Brightness = originalLighting.Brightness
-        Lighting.ClockTime = originalLighting.ClockTime
-        return
-    end
-
+    -- Cleanup
+    if getgenv().VD_WeatherCC then getgenv().VD_WeatherCC:Destroy() end
+    if getgenv().VD_WeatherAtmosphere then getgenv().VD_WeatherAtmosphere:Destroy() end
+    if getgenv().VD_ParticleAnchor then getgenv().VD_ParticleAnchor:Destroy() end
+    
+    -- Apply Atmosphere
     if theme.Atmosphere then
         local atm = Instance.new("Atmosphere", Lighting)
         atm.Name = "VD_WeatherAtmosphere"
         for k, v in pairs(theme.Atmosphere) do pcall(function() atm[k] = v end) end
         getgenv().VD_WeatherAtmosphere = atm
     end
-
+    
+    -- Apply ColorCorrection
     if theme.CC then
         local cc = Instance.new("ColorCorrectionEffect", Lighting)
         cc.Name = "VD_WeatherCC"
         for k, v in pairs(theme.CC) do pcall(function() cc[k] = v end) end
         getgenv().VD_WeatherCC = cc
     end
-
+    
+    -- Apply Lighting
     if theme.Lighting then
         for k, v in pairs(theme.Lighting) do pcall(function() Lighting[k] = v end) end
+    else
+        Lighting.Brightness = originalLighting.Brightness
+        Lighting.ClockTime = originalLighting.ClockTime
+        Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
     end
 
+    -- Setup Particles (เม็ดฝน/หิมะ/ใบไม้ แบบเต็มระบบ)
     if theme.Particle then
         local anchor = Instance.new("Part", workspace)
         anchor.Name = "VD_WeatherAnchor"; anchor.Transparency = 1; anchor.CanCollide = false; anchor.Anchored = true
         anchor.Size = theme.Particle.AnchorSize or Vector3.new(120, 1, 120)
+        anchor:SetAttribute("VD_CameraOffsetX", theme.Particle.CameraOffset and theme.Particle.CameraOffset.X or 0)
+        anchor:SetAttribute("VD_CameraOffsetY", theme.Particle.CameraOffset and theme.Particle.CameraOffset.Y or 30)
+        anchor:SetAttribute("VD_CameraOffsetZ", theme.Particle.CameraOffset and theme.Particle.CameraOffset.Z or 0)
         
         local pe = Instance.new("ParticleEmitter", anchor)
         pe.Enabled = true; pe.EmissionDirection = Enum.NormalId.Bottom
         for k, v in pairs(theme.Particle) do
             if k ~= "AnchorSize" and k ~= "CameraOffset" then pcall(function() pe[k] = v end) end
         end
+
+        -- พิเศษ: Heavy Rain มี 3 ชั้นตามต้นฉบับ
+        if themeName == "Heavy Rain (Storm)" then
+            local nearRain = pe:Clone(); nearRain.Rate = 1800; nearRain.Size = NumberSequence.new(1.65); nearRain.Squash = NumberSequence.new(20); nearRain.Parent = anchor
+            local rainSheet = pe:Clone(); rainSheet.Texture = "rbxasset://textures/particles/smoke_main.dds"; rainSheet.Rate = 650; rainSheet.Size = NumberSequence.new(3.2); rainSheet.Transparency = NumberSequence.new(0.45); rainSheet.Parent = anchor
+        end
+        
+        -- พิเศษ: Autumn มีใบไม้ใหญ่ตามต้นฉบับ
+        if themeName == "Autumn (Musim Gugur)" then
+            local bigLeaves = pe:Clone(); bigLeaves.Rate = 150; bigLeaves.Size = NumberSequence.new(3.1); bigLeaves.Squash = NumberSequence.new(4.5); bigLeaves.Parent = anchor
+        end
+
         getgenv().VD_ParticleAnchor = anchor
-        getgenv().VD_WeatherOffset = theme.Particle.CameraOffset or Vector3.new(0, 30, 0)
     end
 end
 
--- // UI Dropdown
-local WeatherDropdown = Tabs.Main:AddDropdown("WeatherSelect", {
+-- // [LOGIC] Remove Fog (ปุ่มแยกตามสั่ง)
+local function UpdateFog()
+    if _G.RemoveFogEnabled then
+        Lighting.FogEnd = 100000
+        Lighting.FogStart = 0
+        if getgenv().VD_WeatherAtmosphere then getgenv().VD_WeatherAtmosphere.Density = 0 end
+    else
+        local theme = KYS_WeatherPresets[_G.CurrentWeather]
+        Lighting.FogEnd = (theme and theme.Lighting and theme.Lighting.FogEnd) or originalLighting.FogEnd
+    end
+end
+
+-- // UI Elements
+Tabs.Main:AddToggle("RemoveFog", {
+    Title = "Remove Fog (Clear View)",
+    Default = false,
+    Callback = function(v) _G.RemoveFogEnabled = v UpdateFog() end
+})
+
+Tabs.Main:AddDropdown("Weather", {
     Title = "Select Weather Theme",
     Values = {"Default", "Christmas (Snow)", "Heavy Rain (Storm)", "Autumn (Musim Gugur)", "Cherry Blossom (Sakura)", "Sunset (Golden Hour)", "Blood Moon (Spooky)", "Toxic Wasteland", "Vaporwave (Synthwave)", "Midnight (Pitch Black)"},
     Default = "Default",
-    Callback = function(Value)
-        ApplyWeather(Value)
-    end
+    Callback = function(v) _G.CurrentWeather = v ApplyWeather(v) UpdateFog() end
 })
 
--- // Loop for Particle Follow
+-- // [LOOP] Particle Follow (Exact Camera Logic from Codex)
 RunService.Heartbeat:Connect(function()
     local anchor = getgenv().VD_ParticleAnchor
-    if anchor then
-        local cam = workspace.CurrentCamera
-        local offset = getgenv().VD_WeatherOffset or Vector3.new(0, 30, 0)
-        anchor.CFrame = CFrame.new(cam.CFrame.Position + Vector3.new(offset.X, offset.Y, offset.Z))
+    local camera = workspace.CurrentCamera
+    if anchor and camera then
+        local offset = Vector3.new(anchor:GetAttribute("VD_CameraOffsetX") or 0, anchor:GetAttribute("VD_CameraOffsetY") or 30, anchor:GetAttribute("VD_CameraOffsetZ") or 0)
+        anchor.CFrame = CFrame.new(camera.CFrame.Position + camera.CFrame.RightVector * offset.X + Vector3.new(0, offset.Y, 0) + camera.CFrame.LookVector * math.abs(offset.Z))
     end
+    if _G.RemoveFogEnabled then Lighting.FogEnd = 100000 end
 end)
 
 Window:SelectTab(1)
