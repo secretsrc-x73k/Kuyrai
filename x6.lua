@@ -30,7 +30,7 @@ local originalLighting = {
 }
 
 -- // [PRESETS] ดึงมาจากตาราง KYS_WeatherPresets ใน Codex เป๊ะๆ
-local KYS_WeatherPresets = {
+local WeatherPresets = {
     ["Default"] = {},
     ["Christmas (Snow)"] = {
         Lighting = { FogColor = Color3.fromRGB(150, 180, 220), FogEnd = 200, ClockTime = 8, OutdoorAmbient = Color3.fromRGB(100, 120, 150) },
@@ -78,7 +78,7 @@ local KYS_WeatherPresets = {
 
 -- // [CORE FUNCTION] VD_ApplyWeather (Exact Copy from Codex)
 local function ApplyWeather(themeName)
-    local theme = KYS_WeatherPresets[themeName] or KYS_WeatherPresets["Default"]
+    local theme = WeatherPresets[themeName] or WeatherPresets["Default"]
     
     -- Cleanup
     if getgenv().VD_WeatherCC then getgenv().VD_WeatherCC:Destroy() end
@@ -154,7 +154,7 @@ end
 
 -- // UI Elements
 Tabs.Main:AddToggle("RemoveFog", {
-    Title = "Remove Fog (Clear View)",
+    Title = "Remove Fog",
     Default = false,
     Callback = function(v) _G.RemoveFogEnabled = v UpdateFog() end
 })
