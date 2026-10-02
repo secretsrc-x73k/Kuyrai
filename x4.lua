@@ -1,5 +1,5 @@
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-
+--2
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -13,7 +13,9 @@ local GenBypass = {
     CacheTimer = 0,
     Button = nil,
     UI = nil,
-    IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+    IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled,
+    Rebuilding = false,
+    ButtonPosition = UDim2.new(0.85, 0, 0.5, 0)
 }
 
 local function GB_GetAllGenerators()
@@ -173,7 +175,9 @@ end
 
 local function GB_CreateMobileButton()
     if GenBypass.UI then
-        GenBypass.UI:Destroy()
+        pcall(function()
+            GenBypass.UI:Destroy()
+        end)
     end
 
     GenBypass.UI = Instance.new("ScreenGui")
@@ -185,10 +189,10 @@ local function GB_CreateMobileButton()
     local btn = Instance.new("ImageButton")
     btn.Name = "BypassButton"
     btn.Size = UDim2.fromOffset(65, 65)
-    btn.Position = UDim2.new(0.85, 0, 0.5, 0)
+    btn.Position = GenBypass.ButtonPosition
     btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
     btn.BackgroundTransparency = 0.2
-    btn.Visible = false
+    btn.Visible = GenBypass.Enabled and GenBypass.IsMobile
     btn.AutoButtonColor = false
     btn.Parent = GenBypass.UI
 
@@ -221,9 +225,7 @@ local function GB_CreateMobileButton()
             return
         end
 
-        if input.UserInputType == Enum.UserInputType.Touch
-            or input.UserInputType == Enum.UserInputType.MouseButton1 then
-
+        if input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             moved = false
             dragStart = input.Position
@@ -246,9 +248,7 @@ local function GB_CreateMobileButton()
             return
         end
 
-        if input.UserInputType == Enum.UserInputType.Touch
-            or input.UserInputType == Enum.UserInputType.MouseMovement then
-
+        if input.UserInputType == Enum.UserInputType.Touch then
             local delta = input.Position - dragStart
 
             if delta.Magnitude > 8 then
@@ -261,6 +261,8 @@ local function GB_CreateMobileButton()
                 startPos.Y.Scale,
                 startPos.Y.Offset + delta.Y
             )
+
+            GenBypass.ButtonPosition = btn.Position
         end
     end)
 
@@ -282,6 +284,26 @@ local function GB_CreateMobileButton()
     end)
 
     GenBypass.Button = btn
+
+    GenBypass.UI.AncestryChanged:Connect(function(_, parent)
+        if parent then
+            return
+        end
+
+        if GenBypass.Rebuilding then
+            return
+        end
+
+        GenBypass.Rebuilding = true
+
+        task.defer(function()
+            if GenBypass.Enabled then
+                GB_CreateMobileButton()
+            end
+
+            GenBypass.Rebuilding = false
+        end)
+    end)
 end
 
 local function UpdateButtonVisibility()
@@ -295,6 +317,34 @@ local function UpdateButtonVisibility()
 end
 
 GB_CreateMobileButton()
+
+task.spawn(function()
+    while task.wait(1) do
+        if GenBypass.Enabled then
+            local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+
+            if not playerGui then
+                continue
+            end
+
+            if not GenBypass.UI
+                or not GenBypass.UI.Parent
+                or not GenBypass.Button
+                or not GenBypass.Button.Parent then
+
+                if not GenBypass.Rebuilding then
+                    GenBypass.Rebuilding = true
+
+                    GB_CreateMobileButton()
+
+                    GenBypass.Rebuilding = false
+                end
+            end
+
+            UpdateButtonVisibility()
+        end
+    end
+end)
 
 local Window = Fluent:CreateWindow({
     Title = "REAPER BYPASS",
