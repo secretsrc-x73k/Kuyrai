@@ -35,7 +35,9 @@ local Window = Fluent:CreateWindow({
     MinimizeKey = Enum.KeyCode.RightControl
 })
 
-local KillerTab = Window:AddTab({
+local Tabs = {}
+
+Tabs.Automatic = Window:AddTab({
     Title = "Automatic",
     Icon = "target",
 })
