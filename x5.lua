@@ -1,8 +1,8 @@
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 
 local Window = Fluent:CreateWindow({
-    Title = "HyperX | Auto Escape Standalone",
-    SubTitle = "Violence District Edition",
+    Title = "HyperX | Auto Escape",
+    SubTitle = "Violence District",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
     Acrylic = true,
@@ -14,25 +14,37 @@ local Tabs = {
     Main = Window:AddTab({ Title = "Main", Icon = "home" })
 }
 
--- // Variables from your Codex
+-- // Variables (จาก Codex ของคุณ)
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 _G.AutoEscapeEnabled = false
 
--- // Core Logic: KYS_BeatGameSurvivor (Exact Match)
-local function ExecuteAutoEscape()
-    local char = LocalPlayer.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
+-- // Role Checker (Logic ตาม Codex)
+local function GetRole()
+    if not LocalPlayer.Team then return "Unknown" end
+    local name = LocalPlayer.Team.Name
+    if name == "Killer" then return "Killer" end
+    if name == "Survivors" then return "Survivor" end
+    return "Lobby"
+end
+
+-- // Core Logic: Beat Survivor (Exact Logic)
+local function KYS_BeatGameSurvivor()
+    -- ตรวจสอบ Role: ถ้าไม่ใช่ Survivor จะไม่ทำงาน (ไม่มีการแจ้งเตือน)
+    if GetRole() ~= "Survivor" then return end
+
+    local character = LocalPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
     if not root then return end
 
     local exitPos = nil
     local finishPart = nil
-    local map = workspace:FindFirstChild("Map")
+    local map = Workspace:FindFirstChild("Map")
 
-    -- Scan finishline (Logic จาก Codex คุณ)
+    -- 1. Scan finishline
     for _, obj in ipairs(workspace:GetDescendants()) do
         local nameLower = string.lower(obj.Name)
         if (nameLower == "fininshline" or nameLower == "finishline") and obj:IsA("BasePart") then
@@ -42,7 +54,7 @@ local function ExecuteAutoEscape()
         end
     end
 
-    -- Fallback สำหรับแมพเฉพาะ (ตามโค้ดที่คุณส่งมา)
+    -- 2. Fallback Maps
     if not exitPos and map then
         if map:FindFirstChild("RooftopHitbox") or map:FindFirstChild("Rooftop") then
             finishPart = map:FindFirstChild("RooftopHitbox") or map:FindFirstChild("Rooftop")
@@ -57,12 +69,12 @@ local function ExecuteAutoEscape()
 
     if not exitPos then return end
 
-    -- เริ่มกระบวนการหนี (Loop 10 ครั้งตามต้นฉบับ)
+    -- 3. Execution Loop (10 ครั้ง)
     task.spawn(function()
         for i = 1, 10 do
-            if not root or not root.Parent then break end
+            if not root or not root.Parent or GetRole() ~= "Survivor" then break end
 
-            -- ยิง Remote Event (Exact Path)
+            -- Fire Remote
             pcall(function()
                 local event = ReplicatedStorage:FindFirstChild("Remotes") and 
                               ReplicatedStorage.Remotes:FindFirstChild("Game") and 
@@ -72,14 +84,14 @@ local function ExecuteAutoEscape()
                 end
             end)
 
-            -- แตะเส้นชัย (firetouchinterest)
+            -- Touch Interest
             if firetouchinterest and finishPart then
                 firetouchinterest(root, finishPart, 0)
                 task.wait()
                 firetouchinterest(root, finishPart, 1)
             end
 
-            -- Teleport ในรอบแรก
+            -- Teleport
             if i == 1 then
                 root.Velocity = Vector3.zero
                 root.CFrame = CFrame.new(exitPos + Vector3.new(0, 3, 0))
@@ -90,22 +102,22 @@ local function ExecuteAutoEscape()
     end)
 end
 
--- // UI Elements
+-- // UI Toggle (ลบ Notify ออกแล้ว)
 Tabs.Main:AddToggle("BeatSurvivor", {
     Title = "Beat Survivor (Auto Exit)",
-    Description = "Teleports to exit and fires escape event",
+    Description = "ทํางานเฉพาะทีม Survivor เท่านั้น",
     Default = false,
     Callback = function(Value)
         _G.AutoEscapeEnabled = Value
     end
 })
 
--- // Loop System
+-- // Main Loop
 task.spawn(function()
     while true do
-        if _G.AutoEscapeEnabled then
-            ExecuteAutoEscape()
-            task.wait(5) -- หน่วงเวลาป้องกันการส่ง Remote ซ้ำซ้อนเกินไป
+        if _G.AutoEscapeEnabled and GetRole() == "Survivor" then
+            KYS_BeatGameSurvivor()
+            task.wait(5)
         end
         task.wait(1)
     end
