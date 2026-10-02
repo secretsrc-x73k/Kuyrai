@@ -1,38 +1,7 @@
-local function LoadFluent(url)
-    local ok, result = pcall(function()
-        local loader = load or loadstring
-        if type(loader) ~= "function" then
-            error("load/loadstring is unavailable")
-        end
-        local chunk = loader(game:HttpGet(url))
-        if type(chunk) ~= "function" then
-            error("NewUI response did not compile to a function")
-        end
-        local value = chunk()
-        if type(value) == "function" then
-            value = value()
-        end
-        return value
-    end)
-    if not ok then
-        error("REAPER HUB UI load failed: " .. tostring(result))
-    end
-    if type(result) ~= "table" and type(result) ~= "userdata" then
-        error("REAPER HUB UI load failed: NewUI returned " .. type(result))
-    end
-    return result
-end
-
 local Fluent = LoadFluent("https://raw.githubusercontent.com/secretsrc-x73k/NewUI/refs/heads/main/newui.lua")
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
 
-local VD = getgenv().VD or {}
-getgenv().VD = VD
+
 
 local Window = Fluent:CreateWindow({
     Title = "REAPER HUB",
@@ -44,454 +13,854 @@ local Window = Fluent:CreateWindow({
 })
 
 local KillerTab = Window:AddTab({
-    Title = "Killer",
+    Title = "Automatic",
     Icon = "target",
 })
 
-local VeilSection = KillerTab:AddSection("Veil Silent Aim")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local VIM = game:GetService("VirtualInputManager")
 
-VeilConfig = {
-    Enabled              = false,
-    ShowFOV              = true,
-    ShowTargetLaser      = true,
-    FOV                  = 150,
-    SpearSpeed           = 165,
-    Gravity              = workspace.Gravity * 0.5,
-    MaxDist              = 200,
-    AutoPredict          = false,
-    TargetPart           = "Torso",
-    HorizontalPredictFactor = 1.0,
+local LP = Players.LocalPlayer
+
+local Config = {
+    Enabled = false,
+    Distance = 9,
+    ShowCircle = false,
+    ShowStatusUI = false,
+    CheckInterval = 0.025
 }
 
-VeilState = {
-    chargingSpear    = false,
-    touchInput       = nil,
-    attackCooldown   = false,
-    passiveCooldown  = false,
-    remoteHooked     = false,
-    lastPredictedPos = nil,
+local State = {
+    Cooldown = false,
+    CurrentCD = 0,
+    Connections = {},
+    ActiveAttacks = {},
+    ParryRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Items"):WaitForChild("Parrying Dagger"):WaitForChild("parry"),
+    ResultRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Items"):WaitForChild("Parrying Dagger"):WaitForChild("parryResult"),
+    RayParams = RaycastParams.new()
 }
 
-VeilVelocityCache = {}
+State.RayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-local function Veil_NewDrawing(className)
-    if type(Drawing) == "table" and type(Drawing.new) == "function" then
-        local ok, object = pcall(Drawing.new, className)
-        if ok and object then
-            return object
-        end
-    end
-    return setmetatable({}, {
-        __newindex = function(t, k, v) rawset(t, k, v) end
-    })
-end
-
-VeilDraw = {
-    FOVCircle = Veil_NewDrawing("Circle"),
-    Highlight = Instance.new("Highlight"),
-    Tracer    = Veil_NewDrawing("Circle"),
+local ATTACK_ANIMS = {
+    ["113255068724446"] = true,
+    ["74968262036854"] = true,
+    ["110355011987939"] = true,
+    ["139369275981139"] = true,
+    ["132817836308238"] = true,
+    ["129784271201071"] = true,
+    ["133963973694098"] = true,
+    ["117042998468241"] = true,
+    ["105374834496520"] = true,
+    ["111920872708571"] = true,
+    ["78432063483146"] = true,
+    ["118907603246885"] = true,
+    ["138720291317243"] = true,
+    ["115244153053858"] = true,
+    ["130593238885843"] = true,
+    ["122812055447896"] = true,
+    ["78935059863801"] = true,
+    ["135002183282873"] = true,
+    ["121216847022485"] = true
 }
 
-VeilDraw.FOVCircle.Color     = Color3.fromRGB(255, 0, 255)
-VeilDraw.FOVCircle.Thickness = 1.5
-VeilDraw.FOVCircle.Filled    = false
-VeilDraw.FOVCircle.Visible   = false
+local GUI_NAME = "ReaperStatus"
 
-VeilDraw.Highlight.Name                = "VD_VeilTarget"
-VeilDraw.Highlight.FillColor           = Color3.fromRGB(255, 0, 0)
-VeilDraw.Highlight.OutlineColor        = Color3.fromRGB(255, 255, 255)
-VeilDraw.Highlight.FillTransparency    = 0.5
-VeilDraw.Highlight.OutlineTransparency = 0
+local Colors = {
+    Background = Color3.fromRGB(8, 8, 10),
+    Background2 = Color3.fromRGB(13, 13, 16),
+    Red = Color3.fromRGB(255, 30, 50),
+    White = Color3.fromRGB(245, 245, 247),
+    Muted = Color3.fromRGB(75, 75, 83),
+    TrafficRed = Color3.fromRGB(255, 95, 87),
+    TrafficYellow = Color3.fromRGB(254, 188, 46),
+    TrafficGreen = Color3.fromRGB(40, 200, 64)
+}
 
-VeilDraw.Tracer.Thickness = 2
-VeilDraw.Tracer.Radius    = 5
-VeilDraw.Tracer.Color     = Color3.fromRGB(255, 0, 255)
-VeilDraw.Tracer.Filled    = true
-VeilDraw.Tracer.Visible   = false
-
-function Veil_GetRealVelocity(part, playerName)
-    if not part then return Vector3.zero end
-    local currentPos = part.Position
-    local currentTime = tick()
-    if not VeilVelocityCache[playerName] then
-        VeilVelocityCache[playerName] = {lastPos = currentPos, lastTime = currentTime, velocity = Vector3.zero}
-        return Vector3.zero
-    end
-    local cache = VeilVelocityCache[playerName]
-    local dt = currentTime - cache.lastTime
-    if dt > 0.01 then
-        local rawVelocity = (currentPos - cache.lastPos) / dt
-        if rawVelocity.Magnitude < 100 then
-            cache.velocity = cache.velocity:Lerp(rawVelocity, 0.4)
-        end
-    end
-    cache.lastPos = currentPos
-    cache.lastTime = currentTime
-    return cache.velocity
+if CoreGui:FindFirstChild(GUI_NAME) then
+    CoreGui[GUI_NAME]:Destroy()
 end
 
-function veil_getTargetPart(char)
-    if VeilConfig.TargetPart == "Head" then
-        return char:FindFirstChild("Head")
-    elseif VeilConfig.TargetPart == "Root" then
-        return char:FindFirstChild("HumanoidRootPart")
-    else
-        return char:FindFirstChild("Torso")
-            or char:FindFirstChild("UpperTorso")
-            or char:FindFirstChild("HumanoidRootPart")
-    end
+local Screen = Instance.new("ScreenGui")
+Screen.Name = GUI_NAME
+Screen.IgnoreGuiInset = true
+Screen.Parent = CoreGui
+
+local Main = Instance.new("Frame")
+Main.Name = "Main"
+Main.Size = UDim2.fromOffset(260, 100)
+Main.Position = UDim2.fromScale(0.5, 0.4)
+Main.AnchorPoint = Vector2.new(0.5, 0.5)
+Main.BackgroundColor3 = Colors.Background
+Main.BorderSizePixel = 0
+Main.Visible = false
+Main.Parent = Screen
+
+local function ApplyStyle(obj, radius, color, thick, trans)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius)
+    c.Parent = obj
+
+    local s = Instance.new("UIStroke")
+    s.Color = color
+    s.Thickness = thick
+    s.Transparency = trans or 0
+    s.Parent = obj
+
+    return s
 end
 
-function veil_getClosestSurvivor()
-    local myChar = LocalPlayer.Character
-    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return nil end
-    local cam      = workspace.CurrentCamera
-    local center   = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
-    local bestDist = VeilConfig.FOV
-    local bestTarget = nil
+ApplyStyle(Main, 12, Colors.Red, 1.5, 0.2)
 
-    for _, p in ipairs(game:GetService("Players"):GetPlayers()) do
-        if p ~= LocalPlayer and p.Team and p.Team.Name == "Survivors" and p.Character then
-            local char = p.Character
-            local hum  = char:FindFirstChildOfClass("Humanoid")
-            local part = veil_getTargetPart(char)
-            if hum and hum.Health > 0 and part then
-                local dist3D = (part.Position - myRoot.Position).Magnitude
-                if dist3D <= VeilConfig.MaxDist then
-                    local screenPos, onScreen = cam:WorldToViewportPoint(part.Position)
-                    if onScreen then
-                        local dist2D = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
-                        if dist2D < bestDist then
-                            bestDist   = dist2D
-                            bestTarget = { Player = p, Part = part }
-                        end
-                    end
-                end
+local MainGlow = Instance.new("UIStroke")
+MainGlow.Color = Colors.Red
+MainGlow.Thickness = 6
+MainGlow.Transparency = 0.8
+MainGlow.Parent = Main
+
+local TopBar = Instance.new("Frame")
+TopBar.Name = "TopBar"
+TopBar.Size = UDim2.new(1, -2, 0, 26)
+TopBar.Position = UDim2.fromOffset(1, 1)
+TopBar.BackgroundColor3 = Colors.Background2
+TopBar.BorderSizePixel = 0
+TopBar.Parent = Main
+
+ApplyStyle(TopBar, 11, Colors.Red, 1, 0.8)
+
+local Traffic = Instance.new("Frame")
+Traffic.Size = UDim2.fromOffset(45, 10)
+Traffic.Position = UDim2.fromOffset(10, 8)
+Traffic.BackgroundTransparency = 1
+Traffic.Parent = TopBar
+
+local tCols = {
+    Colors.TrafficRed,
+    Colors.TrafficYellow,
+    Colors.TrafficGreen
+}
+
+for i, col in ipairs(tCols) do
+    local d = Instance.new("Frame")
+    d.Size = UDim2.fromOffset(7, 7)
+    d.Position = UDim2.fromOffset((i - 1) * 14, 0)
+    d.BackgroundColor3 = col
+    d.BorderSizePixel = 0
+    d.Parent = Traffic
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = d
+end
+
+local Header = Instance.new("TextLabel")
+Header.Size = UDim2.new(1, -60, 1, 0)
+Header.Position = UDim2.fromOffset(55, 0)
+Header.BackgroundTransparency = 1
+Header.Text = "REAPER X SYSTEM"
+Header.TextColor3 = Colors.White
+Header.TextTransparency = 0.4
+Header.TextSize = 10
+Header.Font = Enum.Font.GothamBold
+Header.TextXAlignment = Enum.TextXAlignment.Left
+Header.Parent = TopBar
+
+local StatusArea = Instance.new("Frame")
+StatusArea.Size = UDim2.new(1, -20, 1, -35)
+StatusArea.Position = UDim2.fromOffset(10, 35)
+StatusArea.BackgroundTransparency = 1
+StatusArea.Parent = Main
+
+local Indicator = Instance.new("Frame")
+Indicator.Size = UDim2.fromOffset(6, 6)
+Indicator.Position = UDim2.fromOffset(5, 11)
+Indicator.BackgroundColor3 = Colors.TrafficGreen
+Indicator.Parent = StatusArea
+
+local indicatorCorner = Instance.new("UICorner")
+indicatorCorner.CornerRadius = UDim.new(1, 0)
+indicatorCorner.Parent = Indicator
+
+local IndGlow = Instance.new("UIStroke")
+IndGlow.Thickness = 3
+IndGlow.Color = Colors.TrafficGreen
+IndGlow.Transparency = 0.5
+IndGlow.Parent = Indicator
+
+local DistLabel = Instance.new("TextLabel")
+DistLabel.Size = UDim2.new(1, -20, 0, 15)
+DistLabel.Position = UDim2.fromOffset(20, 5)
+DistLabel.BackgroundTransparency = 1
+DistLabel.Text = "Killer Distance : N/A"
+DistLabel.TextColor3 = Colors.White
+DistLabel.TextSize = 12
+DistLabel.Font = Enum.Font.GothamBold
+DistLabel.TextXAlignment = Enum.TextXAlignment.Left
+DistLabel.Parent = StatusArea
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, -20, 0, 15)
+StatusLabel.Position = UDim2.fromOffset(20, 23)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "Status : READY"
+StatusLabel.TextColor3 = Colors.TrafficGreen
+StatusLabel.TextSize = 12
+StatusLabel.Font = Enum.Font.GothamBold
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatusLabel.Parent = StatusArea
+
+local dragging = false
+local dragStart
+local startPos
+
+TopBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = true
+        dragStart = input.Position
+        startPos = Main.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging
+        and (
+            input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch
+        ) then
+
+        local delta = input.Position - dragStart
+
+        Main.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = false
+    end
+end)
+
+local function GetRole(player)
+    local team = player.Team
+    local teamName = team and team.Name or "None"
+    local lower = string.lower(teamName)
+
+    if lower:find("killer")
+        or lower:find("murder")
+        or lower:find("beast") then
+        return "Killer"
+    end
+
+    if lower:find("survivor")
+        or lower:find("innocent")
+        or lower:find("human") then
+        return "Survivors"
+    end
+
+    return "Spectator"
+end
+
+local function IsDowned(character)
+    if not character then
+        return true
+    end
+
+    if character:GetAttribute("State") == "Downed" then
+        return true
+    end
+
+    if character:GetAttribute("State") == "Dead" then
+        return true
+    end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+    if humanoid and humanoid.Health <= 0 then
+        return true
+    end
+
+    return false
+end
+
+local function IsDirectionValid(killer, victim, attackCF)
+    local kRoot = killer.PrimaryPart
+    local vRoot = victim.PrimaryPart
+
+    if not kRoot or not vRoot then
+        return false
+    end
+
+    local offset = vRoot.Position - attackCF.Position
+
+    if offset.Magnitude <= 0 then
+        return true
+    end
+
+    local look = Vector3.new(
+        attackCF.LookVector.X,
+        0,
+        attackCF.LookVector.Z
+    )
+
+    local target = Vector3.new(
+        offset.X,
+        0,
+        offset.Z
+    )
+
+    if look.Magnitude <= 0 or target.Magnitude <= 0 then
+        return false
+    end
+
+    return look.Unit:Dot(target.Unit) > 0.4
+end
+
+local function IsThreatening(killer, victim, range, attackCF)
+    local kPart = killer.PrimaryPart
+
+    if not kPart then
+        return false
+    end
+
+    local kCF = attackCF or kPart.CFrame
+
+    local angles = {
+        -72.5,
+        -60.4,
+        -48.3,
+        -36.25,
+        -24.2,
+        -12.1,
+        0,
+        12.1,
+        24.2,
+        36.25,
+        48.3,
+        60.4,
+        72.5
+    }
+
+    local levels = {
+        {
+            offset = -1.8,
+            pitch = math.rad(-15)
+        },
+        {
+            offset = 0,
+            pitch = 0
+        },
+        {
+            offset = 1.8,
+            pitch = math.rad(15)
+        }
+    }
+
+    State.RayParams.FilterDescendantsInstances = {
+        killer,
+        workspace.CurrentCamera
+    }
+
+    for i = 1, #levels do
+        local origin =
+            (kCF * CFrame.new(0, levels[i].offset, 0)).Position
+
+        for j = 1, #angles do
+            local direction =
+                (
+                    kCF
+                    * CFrame.Angles(
+                        levels[i].pitch,
+                        math.rad(angles[j]),
+                        0
+                    )
+                ).LookVector
+
+            local rayResult = workspace:Raycast(
+                origin,
+                direction * (range + 3),
+                State.RayParams
+            )
+
+            if rayResult
+                and rayResult.Instance
+                and rayResult.Instance:IsDescendantOf(victim) then
+                return true
             end
         end
     end
-    return bestTarget
+
+    return false
 end
 
-function veil_setupInterceptor()
-    if VeilState.remoteHooked then return end
-    task.spawn(function()
-        pcall(function()
-            local oldNamecall
-            oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-                local method = getnamecallmethod()
-                if not checkcaller() and method == "FireServer" then
-                    if self.Name == "Spearthrow" and VeilConfig.Enabled then
-                        return nil
-                    end
-                end
-                return oldNamecall(self, ...)
-            end)
-            VeilState.remoteHooked = true
-        end)
-    end)
-end
-
-veil_setupInterceptor()
-
-function veil_fire()
-    if VeilState.attackCooldown then return end
-    VeilState.attackCooldown = true
-    task.delay(2, function() VeilState.attackCooldown = false end)
-
-    local myChar    = LocalPlayer.Character
-    local startPart = myChar and (myChar:FindFirstChild("Head") or myChar:FindFirstChild("HumanoidRootPart"))
-    if not startPart then return end
-
-    local startPos   = startPart.Position
-    local targetInfo = veil_getClosestSurvivor()
-    local aimDir
-
-    if targetInfo and targetInfo.Part then
-        local targetPart = targetInfo.Part
-        local targetPlayer = targetInfo.Player
-        local targetPos = targetPart.Position
-
-        local velocity = Veil_GetRealVelocity(targetPart, targetPlayer.Name)
-        local horizontalVel = Vector3.new(velocity.X, 0, velocity.Z)
-        local speed = horizontalVel.Magnitude
-
-        local distance = (targetPos - startPos).Magnitude
-        local timeToHit = distance / VeilConfig.SpearSpeed
-
-        local horizontalPrediction = Vector3.zero
-        if speed > 4 and VeilConfig.AutoPredict then
-            local factor = VeilConfig.HorizontalPredictFactor
-            horizontalPrediction = horizontalVel * timeToHit * factor
-        end
-        local predictedPos = targetPos + horizontalPrediction
-
-        local autoGravity = math.max(0, distance - 8)
-        local gravity = VeilConfig.AutoPredict and autoGravity or VeilConfig.Gravity
-        local drop = 0.5 * gravity * (timeToHit ^ 2)
-        local finalPos = predictedPos + Vector3.new(0, drop, 0)
-
-        aimDir = (finalPos - startPos).Unit
-        VeilState.lastPredictedPos = finalPos
-    else
-        aimDir = workspace.CurrentCamera.CFrame.LookVector
-        VeilState.lastPredictedPos = nil
-    end
-
+local function PerformInput()
     pcall(function()
-        local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
-        if remotes then
-            local killers = remotes:FindFirstChild("Killers")
-            if killers then
-                local veil = killers:FindFirstChild("Veil")
-                if veil and veil:FindFirstChild("Spearthrow") then
-                    veil.Spearthrow:FireServer(aimDir, VeilConfig.SpearSpeed, startPos)
+        local survivorMob =
+            LP.PlayerGui:FindFirstChild(
+                "Survivor-mob",
+                true
+            )
+
+        local mobBtn =
+            survivorMob
+            and survivorMob:FindFirstChild(
+                "Gui-mob",
+                true
+            )
+
+        if mobBtn and mobBtn.Visible then
+            firesignal(mobBtn.MouseButton1Down)
+        else
+            VIM:SendMouseButtonEvent(
+                0,
+                0,
+                1,
+                true,
+                game,
+                0
+            )
+
+            task.wait(0.01)
+
+            VIM:SendMouseButtonEvent(
+                0,
+                0,
+                1,
+                false,
+                game,
+                0
+            )
+        end
+    end)
+end
+
+local function ExecuteParry()
+    if State.Cooldown then
+        return
+    end
+
+    State.Cooldown = true
+
+    for i = 1, 8 do
+        pcall(function()
+            State.ParryRemote:FireServer()
+        end)
+    end
+
+    PerformInput()
+end
+
+State.ResultRemote.OnClientEvent:Connect(function(_, cd)
+    State.CurrentCD = tonumber(cd) or 0.8
+    State.Cooldown = true
+end)
+
+local function CleanupAttack(track)
+    local attack = State.ActiveAttacks[track]
+
+    if not attack then
+        return
+    end
+
+    attack.Active = false
+
+    if attack.Connection then
+        pcall(function()
+            attack.Connection:Disconnect()
+        end)
+    end
+
+    State.ActiveAttacks[track] = nil
+end
+
+local function StartAttackWindow(char, track)
+    if State.ActiveAttacks[track] then
+        return
+    end
+
+    if not Config.Enabled
+        or State.Cooldown
+        or GetRole(LP) ~= "Survivors" then
+        return
+    end
+
+    local myChar = LP.Character
+
+    if not myChar
+        or IsDowned(myChar) then
+        return
+    end
+
+    local kRoot = char.PrimaryPart
+    local vRoot = myChar.PrimaryPart
+
+    if not kRoot or not vRoot then
+        return
+    end
+
+    local attackCF = kRoot.CFrame
+
+    local attackState = {
+        Active = true,
+        AttackCF = attackCF,
+        Connection = nil
+    }
+
+    State.ActiveAttacks[track] = attackState
+
+    attackState.Connection = track.Ended:Connect(function()
+        CleanupAttack(track)
+    end)
+
+    task.spawn(function()
+        while attackState.Active
+            and Config.Enabled
+            and track
+            and track.IsPlaying do
+
+            local currentChar = LP.Character
+
+            if not currentChar
+                or IsDowned(currentChar) then
+                break
+            end
+
+            local currentKRoot = char.PrimaryPart
+            local currentVRoot = currentChar.PrimaryPart
+
+            if not currentKRoot or not currentVRoot then
+                break
+            end
+
+            local distance =
+                (currentVRoot.Position - currentKRoot.Position).Magnitude
+
+            if distance <= Config.Distance then
+                if IsDirectionValid(
+                    char,
+                    currentChar,
+                    attackState.AttackCF
+                ) then
+
+                    if IsThreatening(
+                        char,
+                        currentChar,
+                        Config.Distance,
+                        attackState.AttackCF
+                    ) then
+
+                        ExecuteParry()
+                        break
+                    end
+                end
+            end
+
+            task.wait(Config.CheckInterval)
+        end
+
+        CleanupAttack(track)
+    end)
+end
+
+local function AttachSensor(char)
+    if not char or State.Connections[char] then
+        return
+    end
+
+    local hum = char:WaitForChild(
+        "Humanoid",
+        10
+    )
+
+    if not hum then
+        return
+    end
+
+    local animator = hum:WaitForChild(
+        "Animator",
+        10
+    )
+
+    if not animator then
+        return
+    end
+
+    State.Connections[char] =
+        animator.AnimationPlayed:Connect(function(track)
+
+            if not Config.Enabled
+                or State.Cooldown
+                or GetRole(LP) ~= "Survivors" then
+                return
+            end
+
+            if not track.Animation then
+                return
+            end
+
+            local animationId =
+                track.Animation.AnimationId:match("%d+")
+
+            if not animationId then
+                return
+            end
+
+            if not ATTACK_ANIMS[animationId] then
+                return
+            end
+
+            StartAttackWindow(
+                char,
+                track
+            )
+        end)
+end
+
+local RangeAdorn =
+    Instance.new(
+        "CylinderHandleAdornment",
+        workspace.Terrain
+    )
+
+RangeAdorn.Height = 0.1
+RangeAdorn.Transparency = 0.5
+
+RunService.RenderStepped:Connect(function(dt)
+    if State.CurrentCD > 0 then
+        State.CurrentCD =
+            math.max(
+                0,
+                State.CurrentCD - dt
+            )
+
+        if State.CurrentCD <= 0 then
+            State.Cooldown = false
+        end
+    end
+
+    local myChar = LP.Character
+    local myRole = GetRole(LP)
+
+    Main.Visible = Config.ShowStatusUI
+
+    if myChar and myChar.PrimaryPart then
+        local myPos =
+            myChar.PrimaryPart.Position
+
+        local closestDist = 999
+
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LP
+                and p.Character
+                and p.Character.PrimaryPart
+                and GetRole(p) == "Killer" then
+
+                local d =
+                    (
+                        myPos
+                        - p.Character.PrimaryPart.Position
+                    ).Magnitude
+
+                if d < closestDist then
+                    closestDist = d
                 end
             end
         end
-    end)
 
-    VeilDraw.FOVCircle.Color = Color3.fromRGB(255, 0, 255)
-    if not VeilState.passiveCooldown then
-        VeilState.passiveCooldown = true
-        task.delay(30, function()
-            VeilDraw.FOVCircle.Color = Color3.fromRGB(255, 0, 255)
-            VeilState.passiveCooldown = false
+        if Config.ShowStatusUI then
+            if myRole ~= "Survivors" then
+                DistLabel.Text =
+                    "Killer Distance : N/A"
+
+                StatusLabel.Text =
+                    "Status : N/A"
+
+                StatusLabel.TextColor3 =
+                    Colors.Muted
+
+                Indicator.BackgroundColor3 =
+                    Colors.Muted
+
+                IndGlow.Color =
+                    Colors.Muted
+            else
+                DistLabel.Text =
+                    "Killer Distance : "
+                    .. (
+                        closestDist == 999
+                        and "N/A"
+                        or string.format(
+                            "%.1f",
+                            closestDist
+                        )
+                    )
+
+                if State.CurrentCD > 0 then
+                    StatusLabel.Text =
+                        string.format(
+                            "Status : CD (%.1fs)",
+                            State.CurrentCD
+                        )
+
+                    StatusLabel.TextColor3 =
+                        Colors.TrafficYellow
+
+                    Indicator.BackgroundColor3 =
+                        Colors.TrafficYellow
+                else
+                    StatusLabel.Text =
+                        "Status : READY"
+
+                    StatusLabel.TextColor3 =
+                        Colors.TrafficGreen
+
+                    Indicator.BackgroundColor3 =
+                        Colors.TrafficGreen
+                end
+
+                IndGlow.Color =
+                    Indicator.BackgroundColor3
+            end
+        end
+
+        if Config.ShowCircle
+            and myRole == "Survivors" then
+
+            RangeAdorn.Visible = true
+
+            RangeAdorn.Color3 =
+                (
+                    State.CurrentCD > 0
+                    and Colors.TrafficYellow
+                )
+                or (
+                    closestDist <= Config.Distance
+                    and Colors.TrafficRed
+                )
+                or Colors.TrafficGreen
+
+            RangeAdorn.Radius =
+                Config.Distance
+
+            RangeAdorn.InnerRadius =
+                Config.Distance - 0.2
+
+            RangeAdorn.Adornee =
+                workspace.Terrain
+
+            RangeAdorn.CFrame =
+                CFrame.new(
+                    myPos - Vector3.new(0, 2.9, 0)
+                )
+                * CFrame.Angles(
+                    math.pi / 2,
+                    0,
+                    0
+                )
+        else
+            RangeAdorn.Visible = false
+        end
+    end
+end)
+
+if Tabs and Tabs.Automatic then
+    Tabs.Automatic:AddToggle(
+        "AutoParry",
+        {
+            Title = "Auto Parry",
+            Default = Config.Enabled,
+            Callback = function(V)
+                Config.Enabled = V
+
+                if not V then
+                    for track in pairs(State.ActiveAttacks) do
+                        CleanupAttack(track)
+                    end
+                end
+            end
+        }
+    )
+
+    Tabs.Automatic:AddSlider(
+        "ParryRange",
+        {
+            Title = "Parry Range",
+            Default = Config.Distance,
+            Min = 5,
+            Max = 12,
+            Rounding = 1,
+            Callback = function(V)
+                Config.Distance =
+                    tonumber(V) or 9
+            end
+        }
+    )
+
+    Tabs.Automatic:AddToggle(
+        "ShowRange",
+        {
+            Title = "Show Range Circle",
+            Default = Config.ShowCircle,
+            Callback = function(V)
+                Config.ShowCircle = V
+            end
+        }
+    )
+
+    Tabs.Automatic:AddToggle(
+        "ShowStatusUI",
+        {
+            Title = "Show Status UI",
+            Default = Config.ShowStatusUI,
+            Callback = function(V)
+                Config.ShowStatusUI = V
+            end
+        }
+    )
+end
+
+for _, p in pairs(Players:GetPlayers()) do
+    if p ~= LP then
+        p.CharacterAdded:Connect(function(char)
+            task.wait(0.1)
+            AttachSensor(char)
         end)
+
+        if p.Character then
+            task.spawn(function()
+                AttachSensor(p.Character)
+            end)
+        end
     end
 end
 
-game:GetService("UserInputService").InputBegan:Connect(function(input, gp)
-    local isTouch = input.UserInputType == Enum.UserInputType.Touch
-    if gp and not isTouch then return end
-    local char = LocalPlayer.Character
-    local isSpearMode = char and char:GetAttribute("spearmode") == true
-    if not VeilConfig.Enabled then return end
-    if not isSpearMode then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        VeilState.chargingSpear = true
-    elseif isTouch then
-        local pGui = LocalPlayer:FindFirstChild("PlayerGui")
-        if pGui then
-            local slasher = pGui:FindFirstChild("Slasher-mob")
-            if slasher then
-                local ctrl = slasher:FindFirstChild("Controls")
-                if ctrl then
-                    local attackBtn = ctrl:FindFirstChild("attack")
-                    if attackBtn and attackBtn.Visible then
-                        local pos     = input.Position
-                        local absPos  = attackBtn.AbsolutePosition
-                        local absSize = attackBtn.AbsoluteSize
-                        if pos.X >= absPos.X and pos.X <= absPos.X + absSize.X
-                        and pos.Y >= absPos.Y and pos.Y <= absPos.Y + absSize.Y then
-                            VeilState.chargingSpear = true
-                            VeilState.touchInput    = input
-                        end
-                    end
-                end
-            end
-        end
-    end
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function(char)
+        task.wait(0.1)
+        AttachSensor(char)
+    end)
 end)
 
-game:GetService("UserInputService").InputEnded:Connect(function(input, gp)
-    if VeilState.chargingSpear
-    and (input == VeilState.touchInput or input.UserInputType == Enum.UserInputType.MouseButton1) then
-        VeilState.chargingSpear = false
-        if VeilState.touchInput == input then VeilState.touchInput = nil end
-        veil_fire()
+LP.CharacterAdded:Connect(function()
+    for track in pairs(State.ActiveAttacks) do
+        CleanupAttack(track)
     end
+
+    State.Cooldown = false
+    State.CurrentCD = 0
 end)
-
-game:GetService("RunService").RenderStepped:Connect(function()
-    local cam         = workspace.CurrentCamera
-    local myChar      = LocalPlayer.Character
-    local isSpearMode = myChar and myChar:GetAttribute("spearmode") == true
-
-    if VeilConfig.Enabled and VeilConfig.ShowFOV and isSpearMode then
-        VeilDraw.FOVCircle.Visible  = true
-        VeilDraw.FOVCircle.Radius   = VeilConfig.FOV
-        VeilDraw.FOVCircle.Position = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
-    else
-        VeilDraw.FOVCircle.Visible = false
-    end
-
-    if VeilState.chargingSpear and VeilConfig.Enabled and isSpearMode then
-        local target = veil_getClosestSurvivor()
-        if target and target.Part and target.Part.Parent then
-            VeilDraw.Highlight.Parent = target.Part.Parent
-            
-            if VeilConfig.ShowTargetLaser then
-                if not getgenv().KYS_SpearLaserPart then
-                    local laser = Instance.new("Part")
-                    laser.Name = "SpearSilentAimLaser"
-                    laser.Anchored = true
-                    laser.CanCollide = false
-                    laser.CanTouch = false
-                    laser.CastShadow = false
-                    laser.Material = Enum.Material.Neon
-                    laser.Color = Color3.fromRGB(255, 50, 50)
-                    laser.Transparency = 0
-                    laser.Parent = workspace
-                    getgenv().KYS_SpearLaserPart = laser
-                end
-                
-                local originPart = myChar and (myChar:FindFirstChild("Head") or myChar:FindFirstChild("HumanoidRootPart"))
-                if originPart then
-                    local originPos = originPart.Position
-                    local targetPos = target.Part.Position
-                    local dist = (targetPos - originPos).Magnitude
-                    if dist > 0.1 then
-                        local laser = getgenv().KYS_SpearLaserPart
-                        laser.Size = Vector3.new(0.16, 0.16, dist)
-                        laser.CFrame = CFrame.new((originPos + targetPos) / 2, targetPos)
-                        laser.Transparency = 0.5
-                    end
-                end
-            else
-                if getgenv().KYS_SpearLaserPart then getgenv().KYS_SpearLaserPart.Transparency = 1 end
-            end
-        else
-            VeilDraw.Highlight.Parent = nil
-            if getgenv().KYS_SpearLaserPart then getgenv().KYS_SpearLaserPart.Transparency = 1 end
-        end
-    else
-        VeilDraw.Highlight.Parent = nil
-        if getgenv().KYS_SpearLaserPart then getgenv().KYS_SpearLaserPart.Transparency = 1 end
-    end
-
-    if VeilConfig.Enabled and isSpearMode and VeilState.lastPredictedPos then
-        local screenPos, onScreen = cam:WorldToViewportPoint(VeilState.lastPredictedPos)
-        local viewport = cam.ViewportSize
-        local center = Vector2.new(viewport.X / 2, viewport.Y / 2)
-
-        if onScreen then
-            VeilDraw.Tracer.Position = Vector2.new(screenPos.X, screenPos.Y)
-        else
-            local dx = screenPos.X - center.X
-            local dy = screenPos.Y - center.Y
-            if math.abs(dx) < 1 and math.abs(dy) < 1 then
-                VeilDraw.Tracer.Position = center
-            else
-                local angle = math.atan2(dy, dx)
-                local maxX = viewport.X / 2 - 10
-                local maxY = viewport.Y / 2 - 10
-                local scaleX = maxX / math.abs(dx)
-                local scaleY = maxY / math.abs(dy)
-                local scale = math.min(scaleX, scaleY)
-                local borderPos = Vector2.new(
-                    center.X + dx * scale,
-                    center.Y + dy * scale
-                )
-                VeilDraw.Tracer.Position = borderPos
-            end
-        end
-        VeilDraw.Tracer.Visible = true
-    else
-        VeilDraw.Tracer.Visible = false
-    end
-end)
-
-VeilSection:AddToggle("Veil_Enabled", {
-    Title = "Silent Aim (Veil)",
-    Default = VeilConfig.Enabled,
-    Callback = function(value)
-        VeilConfig.Enabled = value
-        if not value then
-            VeilState.chargingSpear = false
-            VeilState.lastPredictedPos = nil
-        end
-    end,
-})
-
-VeilSection:AddToggle("Veil_ShowFOV", {
-    Title = "Show FOV",
-    Default = VeilConfig.ShowFOV,
-    Callback = function(value)
-        VeilConfig.ShowFOV = value
-    end,
-})
-
-VeilSection:AddToggle("Veil_ShowTargetLaser", {
-    Title = "Show Target Laser",
-    Default = VeilConfig.ShowTargetLaser,
-    Callback = function(value)
-        VeilConfig.ShowTargetLaser = value
-    end,
-})
-
-VeilSection:AddSlider("Veil_FOV", {
-    Title = "FOV",
-    Default = VeilConfig.FOV,
-    Min = 1,
-    Max = 500,
-    Rounding = 0,
-    Callback = function(value)
-        VeilConfig.FOV = value
-    end,
-})
-
-VeilSection:AddSlider("Veil_SpearSpeed", {
-    Title = "Spear Speed",
-    Min = 1,
-    Max = 500,
-    Default = VeilConfig.SpearSpeed,
-    Rounding = 0,
-    Callback = function(value)
-        VeilConfig.SpearSpeed = value
-    end,
-})
-
-VeilSection:AddSlider("Veil_Gravity", {
-    Title = "Gravity",
-    Min = 0,
-    Max = 300,
-    Default = VeilConfig.Gravity,
-    Rounding = 1,
-    Callback = function(value)
-        VeilConfig.Gravity = value
-    end,
-})
-
-VeilSection:AddSlider("Veil_MaxDist", {
-    Title = "Max Distance",
-    Min = 1,
-    Max = 500,
-    Default = VeilConfig.MaxDist,
-    Rounding = 0,
-    Callback = function(value)
-        VeilConfig.MaxDist = value
-    end,
-})
-
-VeilSection:AddToggle("Veil_AutoPredict", {
-    Title = "Auto Predict",
-    Default = VeilConfig.AutoPredict,
-    Callback = function(value)
-        VeilConfig.AutoPredict = value
-    end,
-})
-
-VeilSection:AddDropdown("Veil_TargetPart", {
-    Title = "Target Part",
-    Values = {"Torso", "Head", "Root"},
-    Default = VeilConfig.TargetPart,
-    Callback = function(value)
-        VeilConfig.TargetPart = value
-    end,
-})
-
-VeilSection:AddSlider("Veil_HorizontalPredict", {
-    Title = "Horizontal Predict Factor",
-    Min = 0,
-    Max = 3,
-    Default = VeilConfig.HorizontalPredictFactor,
-    Rounding = 2,
-    Callback = function(value)
-        VeilConfig.HorizontalPredictFactor = value
-    end,
-})
 
 -- Floating UI toggle
 if game.CoreGui:FindFirstChild("ToggleUI") then
