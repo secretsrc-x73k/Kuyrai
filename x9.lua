@@ -10,14 +10,17 @@ local Window = Fluent:CreateWindow({
     Title = "ReaperX | Silent Aim Flask",
     SubTitle = "Violence District (Mobile)",
     TabWidth = 160,
-    Size = UDim2.fromOffset(450, 320), -- ปรับขนาดให้พอดีมือถือ
-    Acrylic = false, -- ปิดความโปร่งใสเพื่อความลื่นบนมือถือ
+    Size = UDim2.fromOffset(450, 320),
+    Acrylic = false,
     Theme = "Dark",
     MinimizeKey = Enum.KeyCode.RightControl
 })
 
 local Tabs = {
-    Main = Window:AddTab({ Title = "Aiming", Icon = "target" })
+    Main = Window:AddTab({
+        Title = "Aiming",
+        Icon = "target"
+    })
 }
 
 getgenv().VD = getgenv().VD or {
@@ -89,11 +92,13 @@ getgenv().CureFlaskLaserPart = nil
 
 local function UpdateCureFlaskLaser()
     local char = LocalPlayer.Character
+
     if not char then
         return
     end
 
     local hrp = char:FindFirstChild("HumanoidRootPart")
+
     if not hrp then
         return
     end
@@ -162,10 +167,12 @@ local function UpdateCureFlaskLaser()
 
         if dist > 0.1 then
             laser.Size = Vector3.new(0.1, 0.1, dist)
+
             laser.CFrame = CFrame.new(
                 (originPos + targetPos) / 2,
                 targetPos
             )
+
             laser.Transparency = 0
         end
     else
@@ -178,6 +185,7 @@ end
 local FlaskLaserConnection = RunService.RenderStepped:Connect(function()
     if getgenv().VD.KILLER_FlaskLaser then
         pcall(UpdateCureFlaskLaser)
+
     elseif getgenv().CureFlaskLaserPart then
         getgenv().CureFlaskLaserPart:Destroy()
         getgenv().CureFlaskLaserPart = nil
@@ -188,7 +196,7 @@ end)
 -- FLUENT UI
 -- =====================================================
 
-local FlaskSection = Tabs.Killer:AddSection("Flask")
+local FlaskSection = Tabs.Main:AddSection("Flask")
 
 Tabs.Main:AddToggle("FlaskSilentAim", {
     Title = "Flask Silent Aim",
@@ -212,3 +220,5 @@ Tabs.Main:AddToggle("FlaskLaser", {
         end
     end
 })
+
+Window:SelectTab(1)
