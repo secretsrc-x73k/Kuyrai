@@ -1,3 +1,7 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Fluent.lua"))()
 
 local Window = Fluent:CreateWindow({
@@ -10,19 +14,14 @@ local Window = Fluent:CreateWindow({
     MinimizeKey = Enum.KeyCode.RightControl
 })
 
-local Tabs = {
-    Main = Window:AddTab({
-        Title = "Main",
-        Icon = "users"
-    })
-}
+Main = Window:AddTab({ Title = "Main", Icon = "home" })
 
 getgenv().AutoHelpPlayers = false
 
 local HelpConnection = nil
 local CurrentHelpTarget = nil
 
-function setAutoHelpPlayers(v)
+local function setAutoHelpPlayers(v)
     getgenv().AutoHelpPlayers = v
 
     if v then
@@ -63,7 +62,11 @@ function setAutoHelpPlayers(v)
                         if isHooked then
                             ReplicatedStorage.Remotes.Carry.UnHookEvent:FireServer(tChar)
                         else
-                            ReplicatedStorage.Remotes.Healing.HealEvent:FireServer(tRoot, true)
+                            ReplicatedStorage.Remotes.Healing.HealEvent:FireServer(
+                                tRoot,
+                                true
+                            )
+
                             ReplicatedStorage.Remotes.Healing.SkillCheckResultEvent:FireServer(
                                 "success",
                                 100,
@@ -134,13 +137,16 @@ function setAutoHelpPlayers(v)
             local root = char and char:FindFirstChild("HumanoidRootPart")
 
             if root then
-                ReplicatedStorage.Remotes.Healing.HealEvent:FireServer(root, false)
+                ReplicatedStorage.Remotes.Healing.HealEvent:FireServer(
+                    root,
+                    false
+                )
             end
         end)
     end
 end
 
-local AutoHelpSection = Tabs.Main:AddSection("Auto Help")
+local AutoHelpSection = Tabs.Main:AddSection("Auto Help Players")
 
 Tabs.Main:AddToggle("AutoHelpPlayers", {
     Title = "Auto Help Players (Unhook & Heal)",
