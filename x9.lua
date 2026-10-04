@@ -1,4 +1,6 @@
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/main/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/main/Addons/InterfaceManager.lua"))()
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -107,7 +109,7 @@ end)
 
 -- // Fluent UI Setup //
 local Window = Fluent:CreateWindow({
-    Title = "ReaperX | Silent Aim Flask",
+    Title = "HyperX | Silent Aim Flask",
     SubTitle = "Violence District (Mobile)",
     TabWidth = 160,
     Size = UDim2.fromOffset(450, 320), -- ปรับขนาดให้พอดีมือถือ
@@ -124,7 +126,7 @@ local Section = Tabs.Main:AddSection("Flask Cure Settings")
 
 Section:AddToggle("FlaskSilent", {
     Title = "Silent Aim Flask",
-    Description = "",
+    Description = "ล็อคเป้าอัตโนมัติเมื่อปาขวด Cure",
     Default = false,
     Callback = function(Value)
         getgenv().FlaskConfig.Enabled = Value
@@ -133,7 +135,7 @@ Section:AddToggle("FlaskSilent", {
 
 Section:AddToggle("FlaskLaser", {
     Title = "Show Visual Laser",
-    Description = "",
+    Description = "แสดงเส้นนำสายตา (เฉพาะตอนง้างขวด)",
     Default = false,
     Callback = function(Value)
         getgenv().FlaskConfig.Laser = Value
@@ -147,4 +149,10 @@ Section:AddColorPicker("LaserColor", {
         getgenv().FlaskConfig.LaserColor = Value
     end
 })
-เ
+
+-- แสดงแจ้งเตือนเมื่อรันสำเร็จ
+Fluent:Notify({
+    Title = "HyperX Loaded",
+    Content = "Silent Aim Flask พร้อมใช้งานแล้ว",
+    Duration = 3
+})
