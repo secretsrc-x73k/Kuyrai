@@ -2,7 +2,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Fluent.lua"))()
+local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/secretsrc-x73k/NewUI/refs/heads/main/newui.lua"))()
 
 local Window = Fluent:CreateWindow({
     Title = "REAPER HUB",
