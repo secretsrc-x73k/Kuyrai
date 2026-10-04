@@ -2,7 +2,9 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/secretsrc-x73k/NewUI/refs/heads/main/newui.lua"))()
+local Fluent = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/secretsrc-x73k/NewUI/refs/heads/main/newui.lua"
+))()
 
 local Window = Fluent:CreateWindow({
     Title = "REAPER HUB",
@@ -10,11 +12,16 @@ local Window = Fluent:CreateWindow({
     TabWidth = 160,
     Size = UDim2.fromOffset(520, 360),
     Acrylic = false,
-    Theme = "Dark",
+    Theme = "ExtremeReaper",
     MinimizeKey = Enum.KeyCode.RightControl
 })
 
-Main = Window:AddTab({ Title = "Main", Icon = "home" })
+local Tabs = {
+    Main = Window:AddTab({
+        Title = "Main",
+        Icon = "home"
+    })
+}
 
 getgenv().AutoHelpPlayers = false
 
@@ -27,6 +34,7 @@ local function setAutoHelpPlayers(v)
     if v then
         if HelpConnection then
             HelpConnection:Disconnect()
+            HelpConnection = nil
         end
 
         HelpConnection = RunService.Heartbeat:Connect(function()
@@ -129,6 +137,20 @@ local function setAutoHelpPlayers(v)
             HelpConnection = nil
         end
 
+        if CurrentHelpTarget then
+            pcall(function()
+                local tChar = CurrentHelpTarget.Character
+                local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+
+                if tRoot then
+                    ReplicatedStorage.Remotes.Healing.HealEvent:FireServer(
+                        tRoot,
+                        false
+                    )
+                end
+            end)
+        end
+
         CurrentHelpTarget = nil
 
         pcall(function()
@@ -146,11 +168,11 @@ local function setAutoHelpPlayers(v)
     end
 end
 
-local AutoHelpSection = Tabs.Main:AddSection("Auto Help Players")
+Tabs.Main:AddSection("Auto Help Players")
 
 Tabs.Main:AddToggle("AutoHelpPlayers", {
     Title = "Auto Help Players (Unhook & Heal)",
-    Description = "TP to Rescue Hooked and Downed players automatically",
+    Description = "",
     Default = false,
     Callback = function(Value)
         setAutoHelpPlayers(Value)
