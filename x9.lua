@@ -22,7 +22,6 @@ function UpdateCureFlaskLaser()
 
     local targetPos = nil
     local originPos = nil
-
     local closest = nil
     local minDst = math.huge
 
@@ -89,11 +88,9 @@ function UpdateCureFlaskLaser()
             laser.CanCollide = false
             laser.CanTouch = false
             laser.CastShadow = false
-
             laser.Material = Enum.Material.Neon
             laser.Color = Color3.fromRGB(0, 100, 255)
             laser.Transparency = 0
-
             laser.Parent = workspace
 
             _genv.CureFlaskLaserPart = laser
@@ -171,14 +168,14 @@ local function InstallFlaskHook()
         return
     end
 
-    if _genv.oldNamecall then
+    if _genv.FlaskOldNamecall then
         _genv.FlaskStandaloneHook = true
         return
     end
 
     _genv.FlaskStandaloneHook = true
 
-    _genv.oldNamecall =
+    _genv.FlaskOldNamecall =
         hookmetamethod(game, "__namecall", function(self, ...)
 
             local method = getnamecallmethod()
@@ -254,7 +251,7 @@ local function InstallFlaskHook()
 
                         setnamecallmethod(method)
 
-                        return _genv.oldNamecall(
+                        return _genv.FlaskOldNamecall(
                             self,
                             unpack(args)
                         )
@@ -262,8 +259,8 @@ local function InstallFlaskHook()
                 end
             end
 
-            if _genv.oldNamecall then
-                return _genv.oldNamecall(
+            if _genv.FlaskOldNamecall then
+                return _genv.FlaskOldNamecall(
                     self,
                     ...
                 )
@@ -273,43 +270,50 @@ end
 
 InstallFlaskHook()
 
+local FlaskSection =
+    Tabs.Main:AddSection("Silent Aim Flask")
 
-local FlaskSection = Tabs.Main:AddSection("Silent Aim Flask")
+Tabs.Main:AddToggle("FlaskSilentAim", {
+    Title = "Silent Aim Flask (Cure)",
+    Default = VD.KILLER_SilentAimFlask,
 
-Tabs.Main:AddToggle("FlaskSilentAim",{
-        Title = "Silent Aim Flask (Cure)",
-        Default = VD.KILLER_SilentAimFlask,
-        Callback = function(value)
+    Callback = function(value)
         VD.KILLER_SilentAimFlask = value
-end
-    }
-)
+    end
+})
 
+Tabs.Main:AddToggle("FlaskLaser", {
+    Title = "Flask Laser (Cure)",
+    Default = VD.KILLER_FlaskLaser,
 
-Tabs.Main:AddToggle("FlaskLaser",{
-        Title = "Flask Laser (Cure)",
-        Default =
-        VD.KILLER_FlaskLaser,
-        Callback = function(value)
-        VD.KILLER_FlaskLaser = value if value then
-        pcall(StartCureFlaskLaser)
-            else
-                if _genv.CureFlaskLaserThread then
-                    _genv.CureFlaskLaserThread:Disconnect()
-                    _genv.CureFlaskLaserThread = nil
-                end
+    Callback = function(value)
 
-                if _genv.CureFlaskLaserPart then
-                    pcall(function()
-                        _genv.CureFlaskLaserPart:Destroy()
-                    end)
+        VD.KILLER_FlaskLaser = value
 
-                    _genv.CureFlaskLaserPart = nil
-                end
+        if value then
+
+            pcall(StartCureFlaskLaser)
+
+        else
+
+            if _genv.CureFlaskLaserThread then
+
+                _genv.CureFlaskLaserThread:Disconnect()
+                _genv.CureFlaskLaserThread = nil
+
+            end
+
+            if _genv.CureFlaskLaserPart then
+
+                pcall(function()
+                    _genv.CureFlaskLaserPart:Destroy()
+                end)
+
+                _genv.CureFlaskLaserPart = nil
             end
         end
-    }
-)
+    end
+})
 
 if VD.KILLER_FlaskLaser then
     pcall(StartCureFlaskLaser)
