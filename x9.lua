@@ -5,7 +5,17 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
--- // Fluent UI Setup //
+getgenv().VD = getgenv().VD or {}
+
+if getgenv().VD.KILLER_SilentAimFlask == nil then
+    getgenv().VD.KILLER_SilentAimFlask = true
+end
+
+if getgenv().VD.KILLER_FlaskLaser == nil then
+    getgenv().VD.KILLER_FlaskLaser = true
+end
+
+
 local Window = Fluent:CreateWindow({
     Title = "ReaperX | Silent Aim Flask",
     SubTitle = "Violence District (Mobile)",
@@ -23,14 +33,6 @@ local Tabs = {
     })
 }
 
-getgenv().VD = getgenv().VD or {
-    KILLER_SilentAimFlask = true,
-    KILLER_FlaskLaser = true
-}
-
--- =====================================================
--- SILENT AIM
--- =====================================================
 
 local oldNamecall
 
@@ -38,27 +40,106 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     local method = getnamecallmethod()
     local args = {...}
 
-    if getgenv().VD.KILLER_SilentAimFlask
-        and method == "FireServer"
-        and self.Name == "ThrowFlask" then
+    if method == "FireServer" and self.Name == "ThrowFlask" then
+        if getgenv().VD.KILLER_SilentAimFlask then
 
-        local closest = nil
-        local minDst = math.huge
+            local closest = nil
+            local minDst = math.huge
 
-        local char = LocalPlayer.Character
-        local myRoot = char and char:FindFirstChild("HumanoidRootPart")
+            local character = LocalPlayer.Character
 
-        if myRoot then
-            local myPos = myRoot.Position
+            local root =
+                character
+                and character:FindFirstChild("HumanoidRootPart")
 
-            for _, v in pairs(Players:GetPlayers()) do
-                if v ~= LocalPlayer
-                    and v.Character
-                    and v.Character:FindFirstChild("HumanoidRootPart")
-                    and not v.Character:GetAttribute("IsKiller") then
+            local myPos = root and root.Position
+
+            if myPos then
+
+                for _, v in pairs(Players:GetPlayers()) do
+
+                    if v ~= LocalPlayer
+                        and v.Character
+                        and v.Character:FindFirstChild("HumanoidRootPart") then
+
+                        if not v.Character:GetAttribute("IsKiller") then
+
+                            local dst = (
+                                v.Character.HumanoidRootPart.Position
+                                - myPos
+                            ).Magnitude
+
+                            if dst < minDst then
+                                minDst = dst
+                                closest = v
+                            end
+                        end
+                    end
+                end
+            end
+
+            if closest then
+
+                local targetPos =
+                    closest.Character.HumanoidRootPart.Position
+
+                if args[2] and typeof(args[2]) == "Vector3" then
+
+                    args[1] =
+                        (targetPos - args[2]).Unit
+
+                end
+
+                return oldNamecall(
+                    self,
+                    unpack(args)
+                )
+            end
+        end
+    end
+
+    return oldNamecall(self, ...)
+end)
+
+getgenv().KYS_CureFlaskLaserPart = nil
+
+function UpdateCureFlaskLaser()
+
+    local char = LocalPlayer.Character
+
+    if not char then
+        return
+    end
+
+    local targetPos = nil
+    local originPos = nil
+    local closest = nil
+    local minDst = math.huge
+
+    local hrp =
+        char:FindFirstChild("HumanoidRootPart")
+
+    if hrp then
+
+        local hand =
+            char:FindFirstChild("LeftHand")
+            or char:FindFirstChild("Left Arm")
+
+        originPos =
+            hand and hand.Position
+            or hrp.Position
+
+        for _, v in pairs(Players:GetPlayers()) do
+
+            if v ~= LocalPlayer
+                and v.Character
+                and v.Character:FindFirstChild("HumanoidRootPart") then
+
+                if not v.Character:GetAttribute("IsKiller") then
 
                     local dst = (
-                        v.Character.HumanoidRootPart.Position - myPos
+                        v.Character.HumanoidRootPart.Position
+                        - hrp.Position
                     ).Magnitude
 
                     if dst < minDst then
@@ -68,76 +149,18 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 end
             end
         end
-
-        if closest then
-            local targetPos =
-                closest.Character.HumanoidRootPart.Position
-
-            if args[2] and typeof(args[2]) == "Vector3" then
-                args[1] = (targetPos - args[2]).Unit
-            end
-
-            return oldNamecall(self, unpack(args))
-        end
     end
-
-    return oldNamecall(self, ...)
-end)
-
--- =====================================================
--- FLASK LASER
--- =====================================================
-
-getgenv().CureFlaskLaserPart = nil
-
-local function UpdateCureFlaskLaser()
-    local char = LocalPlayer.Character
-
-    if not char then
-        return
-    end
-
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-
-    if not hrp then
-        return
-    end
-
-    local hand =
-        char:FindFirstChild("LeftHand")
-        or char:FindFirstChild("Left Arm")
-
-    local originPos = hand and hand.Position or hrp.Position
-
-    local closest = nil
-    local minDst = math.huge
-
-    for _, v in pairs(Players:GetPlayers()) do
-        if v ~= LocalPlayer
-            and v.Character
-            and v.Character:FindFirstChild("HumanoidRootPart")
-            and not v.Character:GetAttribute("IsKiller") then
-
-            local dst = (
-                v.Character.HumanoidRootPart.Position - hrp.Position
-            ).Magnitude
-
-            if dst < minDst then
-                minDst = dst
-                closest = v
-            end
-        end
-    end
-
-    local targetPos
 
     if closest then
-        targetPos = closest.Character.HumanoidRootPart.Position
+        targetPos =
+            closest.Character.HumanoidRootPart.Position
     end
 
+    -- Check Flask action state
     local actionActive = false
 
     for _, child in pairs(char:GetChildren()) do
+
         if child:IsA("LocalScript")
             and child:GetAttribute("action") == true then
 
@@ -146,64 +169,82 @@ local function UpdateCureFlaskLaser()
         end
     end
 
-    if originPos and targetPos and actionActive then
-        if not getgenv().CureFlaskLaserPart then
+    -- Create / update laser
+    if originPos
+        and targetPos
+        and actionActive
+        and getgenv().VD.KILLER_FlaskLaser then
+
+        if not getgenv().KYS_CureFlaskLaserPart then
+
             local laser = Instance.new("Part")
 
             laser.Name = "FlaskSilentAimLaser"
+
             laser.Anchored = true
             laser.CanCollide = false
             laser.CanTouch = false
-            laser.CanQuery = false
+
             laser.Material = Enum.Material.Neon
             laser.Color = Color3.fromRGB(0, 100, 255)
+
             laser.Parent = workspace
 
-            getgenv().CureFlaskLaserPart = laser
+            getgenv().KYS_CureFlaskLaserPart = laser
         end
 
-        local laser = getgenv().CureFlaskLaserPart
-        local dist = (targetPos - originPos).Magnitude
+        local dist =
+            (targetPos - originPos).Magnitude
 
         if dist > 0.1 then
-            laser.Size = Vector3.new(0.1, 0.1, dist)
 
-            laser.CFrame = CFrame.new(
-                (originPos + targetPos) / 2,
-                targetPos
-            )
+            local laser =
+                getgenv().KYS_CureFlaskLaserPart
+
+            laser.Size =
+                Vector3.new(
+                    0.16,
+                    0.16,
+                    dist
+                )
+
+            laser.CFrame =
+                CFrame.new(
+                    (originPos + targetPos) / 2,
+                    targetPos
+                )
 
             laser.Transparency = 0
         end
+
     else
-        if getgenv().CureFlaskLaserPart then
-            getgenv().CureFlaskLaserPart.Transparency = 1
+
+        if getgenv().KYS_CureFlaskLaserPart then
+            getgenv().KYS_CureFlaskLaserPart.Transparency = 1
         end
     end
 end
 
-local FlaskLaserConnection = RunService.RenderStepped:Connect(function()
-    if getgenv().VD.KILLER_FlaskLaser then
-        pcall(UpdateCureFlaskLaser)
+RunService.RenderStepped:Connect(function()
 
-    elseif getgenv().CureFlaskLaserPart then
-        getgenv().CureFlaskLaserPart:Destroy()
-        getgenv().CureFlaskLaserPart = nil
-    end
+    pcall(function()
+        UpdateCureFlaskLaser()
+    end)
+
 end)
 
--- =====================================================
--- FLUENT UI
--- =====================================================
 
-local FlaskSection = Tabs.Main:AddSection("Flask")
+local FlaskSection =
+    Tabs.Main:AddSection("Flask")
 
 Tabs.Main:AddToggle("FlaskSilentAim", {
     Title = "Flask Silent Aim",
     Default = getgenv().VD.KILLER_SilentAimFlask,
 
     Callback = function(Value)
+
         getgenv().VD.KILLER_SilentAimFlask = Value
+
     end
 })
 
@@ -212,11 +253,17 @@ Tabs.Main:AddToggle("FlaskLaser", {
     Default = getgenv().VD.KILLER_FlaskLaser,
 
     Callback = function(Value)
+
         getgenv().VD.KILLER_FlaskLaser = Value
 
-        if not Value and getgenv().CureFlaskLaserPart then
-            getgenv().CureFlaskLaserPart:Destroy()
-            getgenv().CureFlaskLaserPart = nil
+        if not Value then
+
+            if getgenv().KYS_CureFlaskLaserPart then
+
+                getgenv().KYS_CureFlaskLaserPart:Destroy()
+                getgenv().KYS_CureFlaskLaserPart = nil
+
+            end
         end
     end
 })
