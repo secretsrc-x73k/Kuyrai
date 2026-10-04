@@ -1,34 +1,31 @@
-local Fluent = loadstring(game:HttpGet(
-    "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
-))()
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
+local _genv = getgenv()
 
 -- =========================================================
--- FLAGS
+-- VD FLAGS
 -- =========================================================
 
-getgenv().VD = getgenv().VD or {}
+_genv.VD = _genv.VD or {}
+local VD = _genv.VD
 
-if getgenv().VD.KILLER_SilentAimFlask == nil then
-    getgenv().VD.KILLER_SilentAimFlask = false
-end
+VD.KILLER_SilentAimFlask =
+    VD.KILLER_SilentAimFlask or false
 
-if getgenv().VD.KILLER_FlaskLaser == nil then
-    getgenv().VD.KILLER_FlaskLaser = false
-end
-
-local VD = getgenv().VD
+VD.KILLER_FlaskLaser =
+    VD.KILLER_FlaskLaser or false
 
 -- =========================================================
 -- FLASK LASER STATE
 -- =========================================================
 
-getgenv().KYS_CureFlaskLaserThread = nil
-getgenv().KYS_CureFlaskLaserPart = nil
+_genv.KYS_CureFlaskLaserThread = nil
+_genv.KYS_CureFlaskLaserPart = nil
 
 -- =========================================================
 -- FLASK LASER UPDATE
@@ -36,7 +33,7 @@ getgenv().KYS_CureFlaskLaserPart = nil
 
 function KYS_UpdateCureFlaskLaser()
 
-    local char = game:GetService("Players").LocalPlayer.Character
+    local char = Players.LocalPlayer.Character
 
     if not char then
         return
@@ -60,11 +57,9 @@ function KYS_UpdateCureFlaskLaser()
             hand and hand.Position
             or hrp.Position
 
-        for _, v in pairs(
-            game:GetService("Players"):GetPlayers()
-        ) do
+        for _, v in pairs(Players:GetPlayers()) do
 
-            if v ~= game:GetService("Players").LocalPlayer
+            if v ~= Players.LocalPlayer
                 and v.Character
                 and v.Character:FindFirstChild("HumanoidRootPart") then
 
@@ -90,7 +85,8 @@ function KYS_UpdateCureFlaskLaser()
             closest.Character.HumanoidRootPart.Position
     end
 
-    -- Check action attribute
+    -- Original source:
+    -- action == true means flask is being held/charged
     local actionActive = false
 
     for _, child in pairs(char:GetChildren()) do
@@ -103,10 +99,9 @@ function KYS_UpdateCureFlaskLaser()
         end
     end
 
-    -- Create / update laser
     if originPos and targetPos and actionActive then
 
-        if not getgenv().KYS_CureFlaskLaserPart then
+        if not _genv.KYS_CureFlaskLaserPart then
 
             local laser = Instance.new("Part")
 
@@ -122,7 +117,7 @@ function KYS_UpdateCureFlaskLaser()
 
             laser.Parent = workspace
 
-            getgenv().KYS_CureFlaskLaserPart = laser
+            _genv.KYS_CureFlaskLaserPart = laser
         end
 
         local dist =
@@ -131,7 +126,7 @@ function KYS_UpdateCureFlaskLaser()
         if dist > 0.1 then
 
             local laser =
-                getgenv().KYS_CureFlaskLaserPart
+                _genv.KYS_CureFlaskLaserPart
 
             laser.Size =
                 Vector3.new(
@@ -151,10 +146,8 @@ function KYS_UpdateCureFlaskLaser()
 
     else
 
-        if getgenv().KYS_CureFlaskLaserPart then
-
-            getgenv().KYS_CureFlaskLaserPart.Transparency = 1
-
+        if _genv.KYS_CureFlaskLaserPart then
+            _genv.KYS_CureFlaskLaserPart.Transparency = 1
         end
     end
 end
@@ -165,28 +158,28 @@ end
 
 function KYS_StartCureFlaskLaser()
 
-    if getgenv().KYS_CureFlaskLaserThread then
+    if _genv.KYS_CureFlaskLaserThread then
         return
     end
 
-    getgenv().KYS_CureFlaskLaserThread =
+    _genv.KYS_CureFlaskLaserThread =
         RunService.RenderStepped:Connect(function()
 
             if not VD.KILLER_FlaskLaser then
 
-                if getgenv().KYS_CureFlaskLaserPart then
+                if _genv.KYS_CureFlaskLaserPart then
 
                     pcall(function()
-                        getgenv().KYS_CureFlaskLaserPart:Destroy()
+                        _genv.KYS_CureFlaskLaserPart:Destroy()
                     end)
 
-                    getgenv().KYS_CureFlaskLaserPart = nil
+                    _genv.KYS_CureFlaskLaserPart = nil
                 end
 
-                if getgenv().KYS_CureFlaskLaserThread then
+                if _genv.KYS_CureFlaskLaserThread then
 
-                    getgenv().KYS_CureFlaskLaserThread:Disconnect()
-                    getgenv().KYS_CureFlaskLaserThread = nil
+                    _genv.KYS_CureFlaskLaserThread:Disconnect()
+                    _genv.KYS_CureFlaskLaserThread = nil
 
                 end
 
@@ -198,23 +191,32 @@ function KYS_StartCureFlaskLaser()
 end
 
 -- =========================================================
--- CENTRALIZED NAMECALL HOOK
+-- SILENT AIM
+--
+-- IMPORTANT:
+-- If the original REAPER source already installed
+-- KYS_oldNamecall, DO NOT INSTALL ANOTHER HOOK.
 -- =========================================================
 
-local _genv = getgenv()
+local function InstallFlaskHook()
 
-if not _genv.KYS_FlaskHookInstalled then
+    if _genv.KYS_FlaskStandaloneHook then
+        return
+    end
 
-    _genv.KYS_FlaskHookInstalled = true
+    -- If Main.lua's centralized hook already exists,
+    -- don't create a second __namecall hook.
+    if _genv.KYS_oldNamecall then
+        _genv.KYS_FlaskStandaloneHook = true
+        return
+    end
+
+    _genv.KYS_FlaskStandaloneHook = true
 
     _genv.KYS_oldNamecall =
         hookmetamethod(game, "__namecall", function(self, ...)
 
             local method = getnamecallmethod()
-
-            -- =============================================
-            -- SILENT AIM FLASK
-            -- =============================================
 
             if VD.KILLER_SilentAimFlask
                 and method == "FireServer" then
@@ -232,7 +234,7 @@ if not _genv.KYS_FlaskHookInstalled then
                     local minDst = math.huge
 
                     local lp =
-                        game:GetService("Players").LocalPlayer
+                        Players.LocalPlayer
 
                     local myPos =
                         lp.Character
@@ -244,7 +246,7 @@ if not _genv.KYS_FlaskHookInstalled then
                     if myPos then
 
                         for _, v in pairs(
-                            game:GetService("Players"):GetPlayers()
+                            Players:GetPlayers()
                         ) do
 
                             if v ~= lp
@@ -278,6 +280,7 @@ if not _genv.KYS_FlaskHookInstalled then
                             closest.Character
                             .HumanoidRootPart.Position
 
+                        -- EXACTLY like original source:
                         -- args[1] = LookVector
                         -- args[2] = OriginPosition
 
@@ -288,7 +291,6 @@ if not _genv.KYS_FlaskHookInstalled then
                                 (targetPos - args[2]).Unit
                         end
 
-                        -- Keep the original method
                         setnamecallmethod(method)
 
                         return _genv.KYS_oldNamecall(
@@ -299,36 +301,43 @@ if not _genv.KYS_FlaskHookInstalled then
                 end
             end
 
-            -- =============================================
-            -- ORIGINAL NAMECALL
-            -- =============================================
-
             if _genv.KYS_oldNamecall then
-
                 return _genv.KYS_oldNamecall(
                     self,
                     ...
                 )
-
             end
         end)
 end
+
+InstallFlaskHook()
 
 -- =========================================================
 -- FLUENT UI
 -- =========================================================
 
 local Window = Fluent:CreateWindow({
+
     Title = "ReaperX | Silent Aim Flask",
+
     SubTitle = "Violence District (Mobile)",
+
     TabWidth = 160,
-    Size = UDim2.fromOffset(450, 320),
+
+    Size = UDim2.fromOffset(
+        450,
+        320
+    ),
+
     Acrylic = false,
+
     Theme = "Dark",
+
     MinimizeKey = Enum.KeyCode.RightControl
 })
 
 local Tabs = {
+
     Main = Window:AddTab({
         Title = "Aiming",
         Icon = "target"
@@ -342,61 +351,74 @@ local FlaskSection =
 -- SILENT AIM TOGGLE
 -- =========================================================
 
-Tabs.Main:AddToggle("FlaskSilentAim", {
+Tabs.Main:AddToggle(
+    "FlaskSilentAim",
+    {
+        Title = "Silent Aim Flask (Cure)",
 
-    Title = "Silent Aim Flask (Cure)",
+        Default =
+            VD.KILLER_SilentAimFlask,
 
-    Default = VD.KILLER_SilentAimFlask,
+        Callback = function(value)
 
-    Callback = function(v)
+            VD.KILLER_SilentAimFlask =
+                value
 
-        VD.KILLER_SilentAimFlask = v
-
-    end
-})
+        end
+    }
+)
 
 -- =========================================================
 -- LASER TOGGLE
 -- =========================================================
 
-Tabs.Main:AddToggle("FlaskLaser", {
+Tabs.Main:AddToggle(
+    "FlaskLaser",
+    {
+        Title = "Flask Laser (Cure)",
 
-    Title = "Flask Laser (Cure)",
+        Default =
+            VD.KILLER_FlaskLaser,
 
-    Default = VD.KILLER_FlaskLaser,
+        Callback = function(value)
 
-    Callback = function(v)
+            VD.KILLER_FlaskLaser =
+                value
 
-        VD.KILLER_FlaskLaser = v
+            if value then
 
-        if v then
+                pcall(
+                    KYS_StartCureFlaskLaser
+                )
 
-            pcall(KYS_StartCureFlaskLaser)
+            else
 
-        else
+                if _genv.KYS_CureFlaskLaserThread then
 
-            if getgenv().KYS_CureFlaskLaserThread then
+                    _genv.KYS_CureFlaskLaserThread:Disconnect()
 
-                getgenv().KYS_CureFlaskLaserThread:Disconnect()
-                getgenv().KYS_CureFlaskLaserThread = nil
+                    _genv.KYS_CureFlaskLaserThread =
+                        nil
+                end
 
-            end
+                if _genv.KYS_CureFlaskLaserPart then
 
-            if getgenv().KYS_CureFlaskLaserPart then
+                    pcall(function()
 
-                pcall(function()
-                    getgenv().KYS_CureFlaskLaserPart:Destroy()
-                end)
+                        _genv.KYS_CureFlaskLaserPart:Destroy()
 
-                getgenv().KYS_CureFlaskLaserPart = nil
+                    end)
 
+                    _genv.KYS_CureFlaskLaserPart =
+                        nil
+                end
             end
         end
-    end
-})
+    }
+)
 
 -- =========================================================
--- INITIALIZE LASER IF ENABLED
+-- INITIAL STATE
 -- =========================================================
 
 if VD.KILLER_FlaskLaser then
