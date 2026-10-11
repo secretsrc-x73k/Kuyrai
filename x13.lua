@@ -148,7 +148,7 @@ local function InitItem()
         if player.Character then task.spawn(SetupUI, player.Character) end
     end
 
-    local Itobj = Tabs.Teleport:AddSection("ESP ITEM")
+    local Itobj = Tabs.Object:AddSection("ESP ITEM")
 
     Tabs.Object:AddToggle("ItemESP_Icon", {
         Title = "Show Item Icon",
