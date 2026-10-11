@@ -1,5 +1,4 @@
-local function InitItem()
-    local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
     local Players = game:GetService("Players")
     local ContentProvider = game:GetService("ContentProvider")
     local LocalPlayer = Players.LocalPlayer
