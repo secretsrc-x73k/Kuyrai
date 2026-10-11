@@ -1,24 +1,22 @@
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-    local Players = game:GetService("Players")
-    local ContentProvider = game:GetService("ContentProvider")
-    local LocalPlayer = Players.LocalPlayer
-    local Window = Fluent:CreateWindow({
-        Title = "REAPER HUB",
-        SubTitle = "ITEM",
-        TabWidth = 160,
-        Size = UDim2.fromOffset(580, 460),
-        Acrylic = true,
-        Theme = "Dark"
+local Players = game:GetService("Players")
+local ContentProvider = game:GetService("ContentProvider")
+local LocalPlayer = Players.LocalPlayer
+local Window = Fluent:CreateWindow({
+    Title = "REAPER HUB",
+    SubTitle = "ITEM",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark"
+})
+local Tabs = {
+    Object = Window:AddTab({
+        Title = "Object",
+        Icon = "box"
     })
-    local Tabs = {
-        Object = Window:AddTab({
-            Title = "Object",
-            Icon = "box"
-        })
-    }
-
-    local function InitItem()
-    
+}
+local function InitItem()
     local ITEM_DATABASE = {
         ["Adrenaline Shot"] = {
             Icon = "rbxassetid://135388781922226",
@@ -60,7 +58,7 @@ local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/
             Icon = "rbxassetid://110413686590821",
             Color = Color3.fromRGB(255, 165, 0)
         },
-        ["Parry Dagger"] = {
+        ["Parrying Dagger"] = {
             Icon = "rbxassetid://76822757630703",
             Color = Color3.fromRGB(200, 200, 200)
         }
@@ -175,12 +173,6 @@ local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/
         end
         player.CharacterAdded:Connect(SetupUI)
     end
-    local function Init()
-        for _, player in ipairs(Players:GetPlayers()) do
-            CreatePlayerESP(player)
-        end
-        Players.PlayerAdded:Connect(CreatePlayerESP)
-    end
     Tabs.Object:AddToggle("ItemESP_Name", {
         Title = "Show Name Item",
         Default = true,
@@ -195,6 +187,10 @@ local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/
             ESP_Settings.ShowIcon = value
         end
     })
-    Init()
+    for _, player in ipairs(Players:GetPlayers()) do
+        CreatePlayerESP(player)
+    end
+    Players.PlayerAdded:Connect(CreatePlayerESP)
 end
+
 InitItem()
