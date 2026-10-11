@@ -1,6 +1,5 @@
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/secretsrc-x73k/NewUI/refs/heads/main/newui.lua"))()
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 local Window = Fluent:CreateWindow({
@@ -13,10 +12,7 @@ local Window = Fluent:CreateWindow({
 })
 
 local Tabs = {
-    Object = Window:AddTab({
-        Title = "Object",
-        Icon = "box"
-    })
+    Object = Window:AddTab({ Title = "Object", Icon = "box" })
 }
 
 local function InitItem()
@@ -35,47 +31,51 @@ local function InitItem()
     }
 
     local ESP_Settings = {
-        ShowName = true,
-        ShowIcon = true,
+        ShowName = false,
+        ShowIcon = false,
         MaxDistance = 2000
     }
 
-    -- ฟังก์ชันตรวจสอบไอเท็มทั้งในตัวละคร (ถืออยู่) และใน Backpack (สะพาย/เก็บไว้)
+    local ActiveESP = {}
+
     local function GetCurrentItem(player)
         local character = player.Character
         local backpack = player:FindFirstChild("Backpack")
-        
-        -- 1. เช็คในตัวละคร (ที่ถืออยู่)
         if character then
             for _, obj in ipairs(character:GetChildren()) do
                 if ITEM_DATABASE[obj.Name] then return obj.Name end
             end
         end
-        
-        -- 2. เช็คใน Backpack (กรณีเก็บไว้หรือสะพายหลัง)
         if backpack then
             for _, obj in ipairs(backpack:GetChildren()) do
                 if ITEM_DATABASE[obj.Name] then return obj.Name end
             end
         end
-        
         return nil
+    end
+
+    local function UpdateESPState()
+        for _, entry in pairs(ActiveESP) do
+            if entry.Icon then entry.Icon.Visible = ESP_Settings.ShowIcon end
+            if entry.Text then entry.Text.Visible = ESP_Settings.ShowName end
+            if entry.Billboard then entry.Billboard.MaxDistance = ESP_Settings.MaxDistance end
+        end
     end
 
     local function CreatePlayerESP(player)
         if player == LocalPlayer then return end
 
         local function SetupUI(character)
-            local head = character:WaitForChild("Head", 15)
+            local head = character:WaitForChild("Head", 10)
             if not head then return end
 
             local billboard = Instance.new("BillboardGui")
-            billboard.Name = "ItemESP_Root"
+            billboard.Name = "ItemESP"
             billboard.Adornee = head
-            billboard.Size = UDim2.fromOffset(150, 60)
+            billboard.Size = UDim2.fromOffset(100, 50)
             billboard.StudsOffset = Vector3.new(0, 3, 0)
             billboard.AlwaysOnTop = true
-            billboard.ResetOnSpawn = false
+            billboard.MaxDistance = ESP_Settings.MaxDistance
             billboard.Parent = head
 
             local container = Instance.new("Frame")
@@ -86,53 +86,60 @@ local function InitItem()
             local layout = Instance.new("UIListLayout")
             layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
             layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-            layout.SortOrder = Enum.SortOrder.LayoutOrder
-            layout.Padding = UDim.new(0, 4)
+            layout.Padding = UDim.new(0, 2)
             layout.Parent = container
 
             local icon = Instance.new("ImageLabel")
-            icon.Size = UDim2.fromOffset(35, 35)
+            icon.Size = UDim2.fromOffset(30, 30)
             icon.BackgroundTransparency = 1
             icon.ScaleType = Enum.ScaleType.Fit
-            icon.LayoutOrder = 1
+            icon.Visible = ESP_Settings.ShowIcon
             icon.Parent = container
 
             local nameLabel = Instance.new("TextLabel")
+            nameLabel.Size = UDim2.new(1, 0, 0, 14)
             nameLabel.BackgroundTransparency = 1
-            nameLabel.Size = UDim2.new(1, 0, 0, 18)
             nameLabel.Font = Enum.Font.GothamBold
-            nameLabel.TextSize = 12
-            nameLabel.TextStrokeTransparency = 0.5
-            nameLabel.LayoutOrder = 2
+            nameLabel.TextSize = 9
+            nameLabel.TextStrokeTransparency = 0.2
+            nameLabel.Visible = ESP_Settings.ShowName
             nameLabel.Parent = container
 
-            local connection
-            connection = RunService.RenderStepped:Connect(function()
-                -- ตรวจสอบความมีอยู่ของ Player และ Character ตลอดเวลา
-                if not player or not player.Parent or not character or not character.Parent or not head or not head.Parent then
-                    billboard:Destroy()
-                    connection:Disconnect()
-                    return
-                end
+            local entry = {Billboard = billboard, Icon = icon, Text = nameLabel}
+            ActiveESP[player.UserId] = entry
 
+            local function Refresh()
                 local itemName = GetCurrentItem(player)
-                local data = itemName and ITEM_DATABASE[itemName]
-                local camera = workspace.CurrentCamera
-
-                if data and camera then
-                    local dist = (head.Position - camera.CFrame.Position).Magnitude
-                    if dist <= ESP_Settings.MaxDistance then
-                        billboard.Enabled = true
-                        icon.Image = data.Icon
-                        icon.Visible = ESP_Settings.ShowIcon
-                        nameLabel.Text = itemName:upper()
-                        nameLabel.TextColor3 = data.Color
-                        nameLabel.Visible = ESP_Settings.ShowName
-                    else
-                        billboard.Enabled = false
-                    end
+                local data = ITEM_DATABASE[itemName]
+                if data then
+                    billboard.Enabled = true
+                    icon.Image = data.Icon
+                    nameLabel.Text = itemName:upper()
+                    nameLabel.TextColor3 = data.Color
                 else
                     billboard.Enabled = false
+                end
+            end
+
+            -- ประสิทธิภาพสูง: อัปเดตเฉพาะเมื่อมีการเปลี่ยนไอเทม
+            local connections = {}
+            local backpack = player:WaitForChild("Backpack", 5)
+            
+            local function TrackFolder(folder)
+                if not folder then return end
+                table.insert(connections, folder.ChildAdded:Connect(Refresh))
+                table.insert(connections, folder.ChildRemoved:Connect(Refresh))
+            end
+
+            TrackFolder(character)
+            TrackFolder(backpack)
+            Refresh()
+
+            character.AncestryChanged:Connect(function(_, parent)
+                if not parent then
+                    for _, c in ipairs(connections) do c:Disconnect() end
+                    ActiveESP[player.UserId] = nil
+                    billboard:Destroy()
                 end
             end)
         end
@@ -141,17 +148,26 @@ local function InitItem()
         if player.Character then task.spawn(SetupUI, player.Character) end
     end
 
-    -- UI Toggles
-    Tabs.Object:AddToggle("ItemESP_Name", {
-        Title = "Show Name Item",
-        Default = true,
-        Callback = function(v) ESP_Settings.ShowName = v end
-    })
+    local Itobj = Tabs.Teleport:AddSection("ESP ITEM")
 
     Tabs.Object:AddToggle("ItemESP_Icon", {
         Title = "Show Item Icon",
-        Default = true,
-        Callback = function(v) ESP_Settings.ShowIcon = v end
+        Default = false,
+        Callback = function(v) ESP_Settings.ShowIcon = v UpdateESPState() end
+    })
+    
+    -- UI Controls
+    Tabs.Object:AddToggle("ItemESP_Name", {
+        Title = "Show Name Item",
+        Default = false,
+        Callback = function(v) ESP_Settings.ShowName = v UpdateESPState() end
+    })
+
+    Tabs.Object:AddSlider("ItemESP_Dist", {
+        Title = "Max Distance",
+        Min = 100, Max = 2000, Default = 1000,
+        Rounding = 0,
+        Callback = function(v) ESP_Settings.MaxDistance = v UpdateESPState() end
     })
 
     for _, p in ipairs(Players:GetPlayers()) do CreatePlayerESP(p) end
