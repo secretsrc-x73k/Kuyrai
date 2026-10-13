@@ -19,7 +19,7 @@ local Tabs = {
     Main = Window:AddTab({ Title = "Main", Icon = "shield" })
 }
 
-local function InitAntiHook()local function InitAntiHook()
+local function InitAntiHook()
 local Options = Fluent.Options
 local AntiHookData = {
     Enabled = false,
