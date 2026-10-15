@@ -1,4 +1,4 @@
--- [[ Survivor Auto Farm - Anti-Stuck & Fixed Repair Logic ]]
+-- [[ Survivor Auto Farm - Exact Logic with Warp Fix ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -8,12 +8,12 @@ local localPlayer = Players.LocalPlayer
 local AutoFarmEnabled = false
 local activeFarmState = "Idle"
 
--- [[ Variables Logic ]]
-local currentGen = nil
-local currentPoint = nil
+-- [[ Core Variables from Source ]]
+local currentGen = nil    -- ตัวแปรล็อคเครื่องปั่นไฟ
+local currentPoint = nil  -- ตัวแปรล็อคจุดซ่อม
 local isRepairingRemoteActive = false
 local I_Repair = nil
-local lastRepairCheck = 0
+local lastStuckCheck = 0
 
 -- [[ EXACT HELPER FUNCTIONS FROM CODEX ]]
 local function getGeneratorProgress(c)
@@ -47,7 +47,19 @@ local function getNearestKillerInfo()
     return minDist, killerPos
 end
 
--- Interaction Logic (Fixed: Reset status correctly)
+-- Scoring Logic (Exact Function bb from source)
+local function calculateGenScore(gen, killerPos)
+    local part = gen.PrimaryPart or gen:FindFirstChildWhichIsA("BasePart")
+    if not part then return -999999 end
+    local distToKiller = 9999
+    if killerPos then
+        distToKiller = (part.Position - killerPos).Magnitude
+        if distToKiller < 45 then return -999999 end 
+    end
+    local progress = getGeneratorProgress(gen)
+    return (progress * 15) + (distToKiller * 2)
+end
+
 local function stopInteractions()
     if I_Repair and currentPoint then 
         pcall(function() I_Repair:FireServer(currentPoint, false) end) 
@@ -56,10 +68,10 @@ local function stopInteractions()
     currentGen, currentPoint = nil, nil
 end
 
--- [[ CORE AUTO FARM LOOP - STABILITY PATCH ]]
+-- [[ CORE LOOP - RE-STABILIZED ]]
 task.spawn(function()
     while true do
-        task.wait(0.25) -- เพิ่ม Delay เล็กน้อยเพื่อเสถียรภาพ
+        task.wait(0.3) -- เพิ่มดีเลย์การวนรอบให้เสถียรขึ้น
         
         if not AutoFarmEnabled then 
             if currentGen then stopInteractions() end
@@ -71,36 +83,29 @@ task.spawn(function()
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then stopInteractions() continue end
 
-        -- ดึง Remote ตามโครงสร้าง Codex
         if not I_Repair then
             I_Repair = ReplicatedStorage:FindFirstChild("RepairEvent", true)
         end
 
         local kDist, kPos = getNearestKillerInfo()
         
-        -- 1. Flee Logic
+        -- 1. หนี (Flee)
         if kDist < 35 then
             activeFarmState = "FLEEING"
             stopInteractions()
             continue
         end
 
-        -- 2. Target Lock & Stuck Check (จุดที่แก้)
+        -- 2. Target Lock Logic (แก้จุดที่วาปรัวๆ)
         if currentGen then
-            -- เช็คว่าซ่อมอยู่จริงไหมผ่าน Attribute 'repairing' ของตัวละคร (Logic เป๊ะตาม Codex)
-            local isActuallyRepairing = char:GetAttribute("repairing")
-            
-            if isGeneratorCompleted(currentGen) or isGeneratorPaused(currentGen) or (kPos and (currentGen:GetPivot().Position - kPos).Magnitude < 45) then
-                stopInteractions()
-            elseif tick() - lastRepairCheck > 2 then -- ทุก 2 วิ ถ้าวาปไปแล้วแต่สถานะซ่อมไม่ขึ้น ให้ Reset เพื่อส่ง Remote ใหม่
-                if not isActuallyRepairing or isActuallyRepairing == 0 then
-                    isRepairingRemoteActive = false -- บังคับให้ส่ง Remote ซ่อมอีกครั้ง
-                end
-                lastRepairCheck = tick()
+            -- เช็คว่าเครื่องปัจจุบันยังควรซ่อมอยู่ไหม?
+            local tooClose = kPos and (currentGen:GetPivot().Position - kPos).Magnitude < 45
+            if isGeneratorCompleted(currentGen) or isGeneratorPaused(currentGen) or tooClose then
+                stopInteractions() -- ปลดล็อคเครื่องเมื่อเสร็จหรืออันตราย
             end
         end
 
-        -- 3. Search New Gen if Idle
+        -- 3. ค้นหาเครื่อง (เฉพาะตอนที่ไม่มีเป้าหมายที่ล็อคไว้)
         if not currentGen then
             local bestGen = nil
             local bestScore = -math.huge
@@ -111,40 +116,46 @@ task.spawn(function()
 
             for _, gen in ipairs(gens) do
                 if not isGeneratorCompleted(gen) and not isGeneratorPaused(gen) then
-                    local part = gen.PrimaryPart or gen:FindFirstChildWhichIsA("BasePart")
-                    if part then
-                        local dToK = kPos and (part.Position - kPos).Magnitude or 9999
-                        if dToK > 45 then
-                            local prog = getGeneratorProgress(gen)
-                            local score = (prog * 15) + (dToK * 2)
-                            if score > bestScore then bestScore = score bestGen = gen end
-                        end
+                    local score = calculateGenScore(gen, kPos)
+                    if score > bestScore then
+                        bestScore = score
+                        bestGen = gen
                     end
                 end
             end
             currentGen = bestGen
         end
 
-        -- 4. Repair Execution
+        -- 4. เข้าไปซ่อม
         if currentGen then
             activeFarmState = "REPAIRING"
             local point = currentGen:FindFirstChild("GeneratorPoint") or currentGen:FindFirstChildWhichIsA("BasePart")
             if point then
                 currentPoint = point
-                -- วาปและรอจังหวะเล็กน้อยก่อนซ่อม (ลดโอกาส Remote โดน Reject)
-                if (hrp.Position - point.Position).Magnitude > 5 then
+                -- วาปเฉพาะเมื่ออยู่ห่างเกินไป (แก้ปัญหาตัวกระตุก)
+                if (hrp.Position - point.Position).Magnitude > 6 then
                     hrp.CFrame = point.CFrame + Vector3.new(0, 1.5, 0)
-                    task.wait(0.1) 
+                    task.wait(0.1)
                 end
                 
+                -- ส่ง Remote ซ่อม (ส่งครั้งเดียวเมื่อวาปถึง)
                 if I_Repair and not isRepairingRemoteActive then
                     I_Repair:FireServer(point, true)
                     isRepairingRemoteActive = true
-                    lastRepairCheck = tick()
+                    lastStuckCheck = tick()
+                end
+                
+                -- Stuck Check: ถ้าผ่านไป 3 วิแล้ว Attribute 'repairing' ยังไม่ขึ้น ให้ลองส่ง Remote ใหม่
+                if tick() - lastStuckCheck > 3 then
+                    if char:GetAttribute("repairing") == 0 or not char:GetAttribute("repairing") then
+                        isRepairingRemoteActive = false 
+                    end
+                    lastStuckCheck = tick()
                 end
             end
         else
             activeFarmState = "IDLE"
+            stopInteractions()
         end
     end
 end)
@@ -155,27 +166,27 @@ ScreenGui.Name = "SurvivorExactUI"
 ScreenGui.ResetOnSpawn = false
 
 local Main = Instance.new("Frame", ScreenGui)
-Main.Size = UDim2.new(0, 200, 0, 110)
-Main.Position = UDim2.new(0.5, -100, 0.5, -55)
+Main.Size = UDim2.new(0, 210, 0, 110)
+Main.Position = UDim2.new(0.5, -105, 0.5, -55)
 Main.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 Main.Active = true
 Main.Draggable = true
 
 local Corner = Instance.new("UICorner", Main)
 local Stroke = Instance.new("UIStroke", Main)
-Stroke.Color = Color3.fromRGB(50, 50, 50)
+Stroke.Color = Color3.fromRGB(60, 60, 60)
 
 local Title = Instance.new("TextLabel", Main)
 Title.Size = UDim2.new(1, 0, 0, 30)
-Title.Text = "SURVIVOR AUTO FARM"
+Title.Text = "AUTO FARM v2 (FIXED)"
 Title.TextColor3 = Color3.new(1, 1, 1)
 Title.Font = Enum.Font.Ubuntu
 Title.TextSize = 13
 Title.BackgroundTransparency = 1
 
 local Toggle = Instance.new("TextButton", Main)
-Toggle.Size = UDim2.new(0, 170, 0, 35)
-Toggle.Position = UDim2.new(0.5, -85, 0.4, 0)
+Toggle.Size = UDim2.new(0, 180, 0, 35)
+Toggle.Position = UDim2.new(0.5, -90, 0, 40)
 Toggle.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
 Toggle.Text = "STATUS: OFF"
 Toggle.TextColor3 = Color3.new(1, 1, 1)
