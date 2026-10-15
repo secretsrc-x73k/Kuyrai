@@ -1,71 +1,42 @@
--- [[ Survivor Auto Farm - 100% Exact Logic from Context ]]
+-- [[ Survivor Auto Farm - Anti-Warp Version (Exact Logic) ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local PathfindingService = game:GetService("PathfindingService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 
 local localPlayer = Players.LocalPlayer
 local AutoFarmEnabled = false
 local activeFarmState = "Idle"
 
--- [[ Original Variables Dependency ]]
-local cachedGenerators = {}
-local cachedHooks = {}
-local cachedGates = {}
-local repairCooldowns = {} -- สำหรับระบบ R(f, 25)
+-- [[ Variables - Exact Dependency ]]
+local currentGen = nil    -- ตัวแปรล็อคเป้าหมายเครื่องปัจจุบัน
+local currentPoint = nil  -- จุดที่ยืนซ่อมปัจจุบัน
 local isRepairingRemoteActive = false
-local isGateRemoteActive = false
-local currentGen = nil
-local currentPoint = nil
-local lastStatus = "OFF"
-
--- [[ Original Remote Variables ]]
-local I_Repair = nil
-local J_Unhook = nil
-local K_Lever = nil
+local I_Repair, J_Unhook, K_Lever = nil, nil, nil
 
 -- [[ EXACT HELPER FUNCTIONS FROM CODEX ]]
-
-local function isGeneratorCompleted(c)
-    local d = c:GetAttribute("Completed")
-    if d == nil then
-        local f = c:FindFirstChild("Completed")
-        if f and f:IsA("BoolValue") then d = f.Value end
-    end
-    return d == true or tostring(d):lower() == "true"
-end
-
-local function isGeneratorPaused(c)
-    if not c then return false end
-    local d = c:GetAttribute("ProgressPaused")
-    if d == nil then
-        local f = c:FindFirstChild("ProgressPaused")
-        if f and f:IsA("ValueBase") then d = f.Value end
-    end
-    return d == true or tostring(d):lower() == "true"
-end
-
 local function getGeneratorProgress(c)
-    local d = c:GetAttribute("RepairProgress")
-    if not d then
-        local f = c:FindFirstChild("RepairProgress")
-        if f and f:IsA("ValueObject") then d = f.Value end
-    end
+    local d = c:GetAttribute("RepairProgress") or (c:FindFirstChild("RepairProgress") and c.RepairProgress.Value)
     if not d then return 0 end
     local f = tonumber(d)
     return (f <= 1.01 and f > 0) and math.round(f * 100) or math.round(f)
 end
 
--- ระบบหา Killer (U Function)
+local function isGeneratorCompleted(c)
+    local d = c:GetAttribute("Completed") or (c:FindFirstChild("Completed") and c.Completed.Value)
+    return d == true or tostring(d):lower() == "true"
+end
+
+local function isGeneratorPaused(c)
+    local d = c:GetAttribute("ProgressPaused") or (c:FindFirstChild("ProgressPaused") and c.ProgressPaused.Value)
+    return d == true or tostring(d):lower() == "true"
+end
+
 local function getNearestKillerInfo()
     local minDist = math.huge
     local killerPos = nil
     local hrp = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return minDist, nil end
-    
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= localPlayer and p.Team and p.Team.Name == "Killer" and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
             local d = (p.Character.HumanoidRootPart.Position - hrp.Position).Magnitude
@@ -75,94 +46,94 @@ local function getNearestKillerInfo()
     return minDist, killerPos
 end
 
--- ระบบ Scoring (bb Function) เป๊ะๆ
-local function calculateGenScore(gen, killerPos, myPos)
+-- Scoring Logic (Exact Function bb)
+local function calculateGenScore(gen, killerPos)
     local part = gen.PrimaryPart or gen:FindFirstChildWhichIsA("BasePart")
     if not part then return -999999 end
-    
     local distToKiller = 9999
     if killerPos then
         distToKiller = (part.Position - killerPos).Magnitude
-        if distToKiller < 45 then return -999999 end -- ห้ามไปถ้า Killer อยู่ใกล้
+        if distToKiller < 45 then return -999999 end -- Killer ใกล้เกินไป
     end
-    
     local progress = getGeneratorProgress(gen)
-    local score = (progress * 15) + (distToKiller * 2)
-    return score
+    return (progress * 15) + (distToKiller * 2)
 end
 
--- [[ CORE AUTO FARM LOOP (Exact Logic from Context) ]]
-
-local function stopAllInteractions()
-    if I_Repair and currentPoint then
-        pcall(function() I_Repair:FireServer(currentPoint, false) end)
-    end
-    if K_Lever and currentPoint then
-        pcall(function() K_Lever:FireServer(currentPoint, false) end)
-    end
+-- Interaction Logic
+local function stopInteractions()
+    if I_Repair and currentPoint then pcall(function() I_Repair:FireServer(currentPoint, false) end) end
     isRepairingRemoteActive = false
-    isGateRemoteActive = false
-    currentGen = nil
-    currentPoint = nil
+    currentGen, currentPoint = nil, nil
 end
 
+-- [[ CORE AUTO FARM LOOP - FIXED WARPING ]]
 task.spawn(function()
     while true do
         task.wait(0.2)
         if not AutoFarmEnabled then 
-            if lastStatus ~= "OFF" then stopAllInteractions() lastStatus = "OFF" end
+            if currentGen then stopInteractions() end
             activeFarmState = "OFF"
             continue 
         end
-        
-        local hrp = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if not hrp then stopAllInteractions() continue end
 
-        -- Remote Initialization (O function)
+        local hrp = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then stopInteractions() continue end
+
+        -- Init Remotes
         if not I_Repair then
             I_Repair = ReplicatedStorage:FindFirstChild("RepairEvent", true)
-            J_Unhook = ReplicatedStorage:FindFirstChild("UnHookEvent", true)
-            K_Lever = ReplicatedStorage:FindFirstChild("LeverEvent", true)
         end
 
         local kDist, kPos = getNearestKillerInfo()
         
-        -- Logic: Fleeing
+        -- 1. เช็คว่าต้องหนีไหม (Flee Logic)
         if kDist < 35 then
             activeFarmState = "FLEEING"
-            stopAllInteractions()
-            -- Flee Logic...
+            stopInteractions()
             continue
         end
 
-        -- Logic: Picking best Generator (cb function)
-        local bestGen = nil
-        local bestScore = -math.huge
-        
-        -- Scan Gens
-        local gens = {}
-        for _, v in ipairs(workspace:GetDescendants()) do
-            if v.Name == "Generator" and v:IsA("Model") then table.insert(gens, v) end
-        end
-
-        for _, gen in ipairs(gens) do
-            if not isGeneratorCompleted(gen) and not isGeneratorPaused(gen) then
-                local score = calculateGenScore(gen, kPos, hrp.Position)
-                if score > bestScore then
-                    bestScore = score
-                    bestGen = gen
-                end
+        -- 2. ตรวจสอบเครื่องที่กำลังซ่อมอยู่ (Target Lock Logic)
+        if currentGen then
+            -- ถ้าซ่อมเสร็จแล้ว หรือ ถูกขัดขวาง หรือ Killer มาใกล้เครื่องที่ซ่อมอยู่
+            if isGeneratorCompleted(currentGen) or isGeneratorPaused(currentGen) or (kPos and (currentGen:GetPivot().Position - kPos).Magnitude < 45) then
+                stopInteractions() -- เลิกซ่อมเครื่องนี้
             end
         end
 
-        if bestGen then
+        -- 3. ถ้าไม่มีเครื่องที่ล็อคไว้ ให้หาเครื่องใหม่ (Exact Scoring)
+        if not currentGen then
+            local bestGen = nil
+            local bestScore = -math.huge
+            local gens = {}
+            for _, v in ipairs(workspace:GetDescendants()) do
+                if v.Name == "Generator" and v:IsA("Model") then table.insert(gens, v) end
+            end
+
+            for _, gen in ipairs(gens) do
+                if not isGeneratorCompleted(gen) and not isGeneratorPaused(gen) then
+                    local score = calculateGenScore(gen, kPos)
+                    if score > bestScore then
+                        bestScore = score
+                        bestGen = gen
+                    end
+                end
+            end
+            currentGen = bestGen
+        end
+
+        -- 4. การทำงาน (Interaction)
+        if currentGen then
             activeFarmState = "REPAIRING"
-            local point = bestGen:FindFirstChild("GeneratorPoint") or bestGen:FindFirstChildWhichIsA("BasePart")
+            local point = currentGen:FindFirstChild("GeneratorPoint") or currentGen:FindFirstChildWhichIsA("BasePart")
             if point then
-                currentGen = bestGen
                 currentPoint = point
-                hrp.CFrame = point.CFrame + Vector3.new(0, 1.5, 0)
+                -- วาปไปตำแหน่งซ่อม (ครั้งเดียว หรือเมื่ออยู่ห่างเกินไป)
+                if (hrp.Position - point.Position).Magnitude > 5 then
+                    hrp.CFrame = point.CFrame + Vector3.new(0, 1.5, 0)
+                end
                 
+                -- ส่ง Remote ซ่อม
                 if I_Repair and not isRepairingRemoteActive then
                     I_Repair:FireServer(point, true)
                     isRepairingRemoteActive = true
@@ -170,89 +141,61 @@ task.spawn(function()
             end
         else
             activeFarmState = "IDLE"
-            stopAllInteractions()
+            stopInteractions()
         end
-        lastStatus = activeFarmState
     end
 end)
 
--- [[ DRAGGABLE CUSTOM GUI ]]
-
-local ScreenGui = Instance.new("ScreenGui")
+-- [[ GUI SYSTEM - DRAGGABLE ]]
+local ScreenGui = Instance.new("ScreenGui", localPlayer:WaitForChild("PlayerGui"))
 ScreenGui.Name = "SurvivorExactUI"
-ScreenGui.Parent = localPlayer:WaitForChild("PlayerGui")
 ScreenGui.ResetOnSpawn = false
 
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 220, 0, 120)
-MainFrame.Position = UDim2.new(0.5, -110, 0.5, -60)
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Draggable = true -- รองรับการลากแบบดั้งเดิม
-MainFrame.Parent = ScreenGui
+local Main = Instance.new("Frame", ScreenGui)
+Main.Size = UDim2.new(0, 200, 0, 110)
+Main.Position = UDim2.new(0.5, -100, 0.5, -55)
+Main.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+Main.Active = true
+Main.Draggable = true -- เปิดระบบลาก
 
-local Corner = Instance.new("UICorner")
-Corner.CornerRadius = UDim.new(0, 10)
-Corner.Parent = MainFrame
+local Corner = Instance.new("UICorner", Main)
+local Stroke = Instance.new("UIStroke", Main)
+Stroke.Color = Color3.fromRGB(45, 45, 45)
 
-local Stroke = Instance.new("UIStroke")
-Stroke.Color = Color3.fromRGB(45, 45, 55)
-Stroke.Thickness = 2
-Stroke.Parent = MainFrame
-
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 35)
-Title.BackgroundTransparency = 1
-Title.Text = "HYPNOSIS CORE"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+local Title = Instance.new("TextLabel", Main)
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.Text = "AUTO FARM FIXED"
+Title.TextColor3 = Color3.new(1, 1, 1)
 Title.Font = Enum.Font.Ubuntu
-Title.TextSize = 14
-Title.Parent = MainFrame
+Title.TextSize = 13
+Title.BackgroundTransparency = 1
 
-local ToggleBtn = Instance.new("TextButton")
-ToggleBtn.Name = "Toggle"
-ToggleBtn.Size = UDim2.new(0, 180, 0, 35)
-ToggleBtn.Position = UDim2.new(0.5, -90, 0, 45)
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 20, 20)
-ToggleBtn.Text = "AUTO FARM: OFF"
-ToggleBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
-ToggleBtn.Font = Enum.Font.Ubuntu
-ToggleBtn.TextSize = 13
-ToggleBtn.AutoButtonColor = false
-ToggleBtn.Parent = MainFrame
+local Toggle = Instance.new("TextButton", Main)
+Toggle.Size = UDim2.new(0, 170, 0, 35)
+Toggle.Position = UDim2.new(0.5, -85, 0.4, 0)
+Toggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+Toggle.Text = "AUTO FARM: OFF"
+Toggle.TextColor3 = Color3.new(1, 1, 1)
+Toggle.Font = Enum.Font.Ubuntu
+Toggle.TextSize = 12
+Instance.new("UICorner", Toggle)
 
-local BtnCorner = Instance.new("UICorner")
-BtnCorner.CornerRadius = UDim.new(0, 6)
-BtnCorner.Parent = ToggleBtn
+local Status = Instance.new("TextLabel", Main)
+Status.Size = UDim2.new(1, 0, 0, 25)
+Status.Position = UDim2.new(0, 0, 1, -25)
+Status.BackgroundTransparency = 1
+Status.Text = "STATE: IDLE"
+Status.TextColor3 = Color3.fromRGB(150, 150, 150)
+Status.Font = Enum.Font.Code
+Status.TextSize = 10
 
-local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(1, 0, 0, 25)
-StatusLabel.Position = UDim2.new(0, 0, 1, -30)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "STATE: IDLE"
-StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
-StatusLabel.Font = Enum.Font.Code
-StatusLabel.TextSize = 11
-StatusLabel.Parent = MainFrame
-
--- [[ GUI LOGIC ]]
-
-ToggleBtn.MouseButton1Click:Connect(function()
+Toggle.MouseButton1Click:Connect(function()
     AutoFarmEnabled = not AutoFarmEnabled
-    if AutoFarmEnabled then
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 40, 20)
-        ToggleBtn.Text = "AUTO FARM: ON"
-        ToggleBtn.TextColor3 = Color3.fromRGB(100, 255, 100)
-    else
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 20, 20)
-        ToggleBtn.Text = "AUTO FARM: OFF"
-        ToggleBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
-        stopAllInteractions()
-    end
+    Toggle.Text = AutoFarmEnabled and "AUTO FARM: ON" or "AUTO FARM: OFF"
+    Toggle.BackgroundColor3 = AutoFarmEnabled and Color3.fromRGB(50, 180, 50) or Color3.fromRGB(200, 50, 50)
+    if not AutoFarmEnabled then stopInteractions() end
 end)
 
 RunService.RenderStepped:Connect(function()
-    StatusLabel.Text = "STATE: " .. activeFarmState
+    Status.Text = "STATE: " .. activeFarmState:upper()
 end)
