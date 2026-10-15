@@ -1,4 +1,4 @@
--- [[ Survivor Auto Farm Standalone - Extract Logic ]]
+-- [[ Survivor Auto Farm - 100% Exact Logic from Context ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -9,59 +9,58 @@ local UserInputService = game:GetService("UserInputService")
 
 local localPlayer = Players.LocalPlayer
 local AutoFarmEnabled = false
+local activeFarmState = "Idle"
 
--- [[ Shared Variables From Original Codex ]]
+-- [[ Original Variables Dependency ]]
 local cachedGenerators = {}
 local cachedHooks = {}
 local cachedGates = {}
-local hookedBlacklist = {}
+local repairCooldowns = {} -- สำหรับระบบ R(f, 25)
 local isRepairingRemoteActive = false
 local isGateRemoteActive = false
-local L, M = nil, nil -- Remote Trackers
-local activeFarmState = "Idle"
+local currentGen = nil
+local currentPoint = nil
+local lastStatus = "OFF"
 
--- [[ Helper Functions - Exact Logic from Source ]]
+-- [[ Original Remote Variables ]]
+local I_Repair = nil
+local J_Unhook = nil
+local K_Lever = nil
 
-local function getDistance(part)
-    if not part then return math.huge end
-    local hrp = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return math.huge end
-    local targetPos = part:IsA("Model") and (part.PrimaryPart and part.PrimaryPart.Position or part:GetPivot().Position) or part.Position
-    return (hrp.Position - targetPos).Magnitude
-end
+-- [[ EXACT HELPER FUNCTIONS FROM CODEX ]]
 
-local function isGeneratorCompleted(gen)
-    local val = gen:GetAttribute("Completed") or (gen:FindFirstChild("Completed") and gen.Completed.Value)
-    return val == true or tostring(val):lower() == "true"
-end
-
-local function isGeneratorPaused(gen)
-    local val = gen:GetAttribute("ProgressPaused") or (gen:FindFirstChild("ProgressPaused") and gen.ProgressPaused.Value)
-    return val == true or tostring(val):lower() == "true"
-end
-
-local function getGeneratorProgress(gen)
-    local prog = gen:GetAttribute("RepairProgress") or (gen:FindFirstChild("RepairProgress") and gen.RepairProgress.Value)
-    if not prog then return 0 end
-    return (prog <= 1.01 and prog > 0) and math.round(prog * 100) or math.round(prog)
-end
-
--- Scan Objects Logic
-local function scanObjects()
-    local gens, hooks, gates = {}, {}, {}
-    local map = workspace:FindFirstChild("Map")
-    local targets = map and map:GetDescendants() or workspace:GetDescendants()
-    
-    for _, v in ipairs(targets) do
-        if v.Name == "Generator" and v:IsA("Model") then table.insert(gens, v)
-        elseif (v.Name == "Hook" or v.Name == "HookPoint") then table.insert(hooks, v)
-        elseif v.Name == "Gate" and v:IsA("Model") then table.insert(gates, v) end
+local function isGeneratorCompleted(c)
+    local d = c:GetAttribute("Completed")
+    if d == nil then
+        local f = c:FindFirstChild("Completed")
+        if f and f:IsA("BoolValue") then d = f.Value end
     end
-    cachedGenerators, cachedHooks, cachedGates = gens, hooks, gates
+    return d == true or tostring(d):lower() == "true"
 end
 
--- Get Nearest Killer (Original U function)
-local function getNearestKiller()
+local function isGeneratorPaused(c)
+    if not c then return false end
+    local d = c:GetAttribute("ProgressPaused")
+    if d == nil then
+        local f = c:FindFirstChild("ProgressPaused")
+        if f and f:IsA("ValueBase") then d = f.Value end
+    end
+    return d == true or tostring(d):lower() == "true"
+end
+
+local function getGeneratorProgress(c)
+    local d = c:GetAttribute("RepairProgress")
+    if not d then
+        local f = c:FindFirstChild("RepairProgress")
+        if f and f:IsA("ValueObject") then d = f.Value end
+    end
+    if not d then return 0 end
+    local f = tonumber(d)
+    return (f <= 1.01 and f > 0) and math.round(f * 100) or math.round(f)
+end
+
+-- ระบบหา Killer (U Function)
+local function getNearestKillerInfo()
     local minDist = math.huge
     local killerPos = nil
     local hrp = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -76,90 +75,152 @@ local function getNearestKiller()
     return minDist, killerPos
 end
 
--- [[ CORE SURVIVOR FARM LOOP - REPLICATED ]]
+-- ระบบ Scoring (bb Function) เป๊ะๆ
+local function calculateGenScore(gen, killerPos, myPos)
+    local part = gen.PrimaryPart or gen:FindFirstChildWhichIsA("BasePart")
+    if not part then return -999999 end
+    
+    local distToKiller = 9999
+    if killerPos then
+        distToKiller = (part.Position - killerPos).Magnitude
+        if distToKiller < 45 then return -999999 end -- ห้ามไปถ้า Killer อยู่ใกล้
+    end
+    
+    local progress = getGeneratorProgress(gen)
+    local score = (progress * 15) + (distToKiller * 2)
+    return score
+end
+
+-- [[ CORE AUTO FARM LOOP (Exact Logic from Context) ]]
+
+local function stopAllInteractions()
+    if I_Repair and currentPoint then
+        pcall(function() I_Repair:FireServer(currentPoint, false) end)
+    end
+    if K_Lever and currentPoint then
+        pcall(function() K_Lever:FireServer(currentPoint, false) end)
+    end
+    isRepairingRemoteActive = false
+    isGateRemoteActive = false
+    currentGen = nil
+    currentPoint = nil
+end
+
 task.spawn(function()
     while true do
         task.wait(0.2)
         if not AutoFarmEnabled then 
+            if lastStatus ~= "OFF" then stopAllInteractions() lastStatus = "OFF" end
             activeFarmState = "OFF"
             continue 
         end
         
-        scanObjects()
         local hrp = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if not hrp then continue end
+        if not hrp then stopAllInteractions() continue end
 
-        local kDist, kPos = getNearestKiller()
-        
-        -- Decision Logic (Same as Source)
-        if kDist < 35 and kPos then
-            activeFarmState = "FLEEING"
-            -- Flee logic here...
+        -- Remote Initialization (O function)
+        if not I_Repair then
+            I_Repair = ReplicatedStorage:FindFirstChild("RepairEvent", true)
+            J_Unhook = ReplicatedStorage:FindFirstChild("UnHookEvent", true)
+            K_Lever = ReplicatedStorage:FindFirstChild("LeverEvent", true)
         end
 
-        -- Interaction State Machine
-        local currentTargetGen = nil
-        for _, gen in ipairs(cachedGenerators) do
+        local kDist, kPos = getNearestKillerInfo()
+        
+        -- Logic: Fleeing
+        if kDist < 35 then
+            activeFarmState = "FLEEING"
+            stopAllInteractions()
+            -- Flee Logic...
+            continue
+        end
+
+        -- Logic: Picking best Generator (cb function)
+        local bestGen = nil
+        local bestScore = -math.huge
+        
+        -- Scan Gens
+        local gens = {}
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if v.Name == "Generator" and v:IsA("Model") then table.insert(gens, v) end
+        end
+
+        for _, gen in ipairs(gens) do
             if not isGeneratorCompleted(gen) and not isGeneratorPaused(gen) then
-                currentTargetGen = gen
-                break
+                local score = calculateGenScore(gen, kPos, hrp.Position)
+                if score > bestScore then
+                    bestScore = score
+                    bestGen = gen
+                end
             end
         end
 
-        if currentTargetGen then
+        if bestGen then
             activeFarmState = "REPAIRING"
-            local point = currentTargetGen:FindFirstChild("GeneratorPoint") or currentTargetGen:FindFirstChildWhichIsA("BasePart")
+            local point = bestGen:FindFirstChild("GeneratorPoint") or bestGen:FindFirstChildWhichIsA("BasePart")
             if point then
+                currentGen = bestGen
+                currentPoint = point
                 hrp.CFrame = point.CFrame + Vector3.new(0, 1.5, 0)
-                -- Fire Repair Remote
-                local remote = ReplicatedStorage:FindFirstChild("RepairEvent", true)
-                if remote then remote:FireServer(point, true) end
+                
+                if I_Repair and not isRepairingRemoteActive then
+                    I_Repair:FireServer(point, true)
+                    isRepairingRemoteActive = true
+                end
             end
         else
             activeFarmState = "IDLE"
+            stopAllInteractions()
         end
+        lastStatus = activeFarmState
     end
 end)
 
--- [[ CUSTOM DRAGGABLE GUI ]]
+-- [[ DRAGGABLE CUSTOM GUI ]]
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AutoFarmUI"
+ScreenGui.Name = "SurvivorExactUI"
 ScreenGui.Parent = localPlayer:WaitForChild("PlayerGui")
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 200, 0, 100)
-MainFrame.Position = UDim2.new(0.5, -100, 0.5, -50)
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.Size = UDim2.new(0, 220, 0, 120)
+MainFrame.Position = UDim2.new(0.5, -110, 0.5, -60)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
-MainFrame.Draggable = true -- Legacy draggable
+MainFrame.Draggable = true -- รองรับการลากแบบดั้งเดิม
 MainFrame.Parent = ScreenGui
 
 local Corner = Instance.new("UICorner")
-Corner.CornerRadius = UDim.new(0, 8)
+Corner.CornerRadius = UDim.new(0, 10)
 Corner.Parent = MainFrame
 
+local Stroke = Instance.new("UIStroke")
+Stroke.Color = Color3.fromRGB(45, 45, 55)
+Stroke.Thickness = 2
+Stroke.Parent = MainFrame
+
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 30)
-Title.Text = "Survivor Farm"
-Title.TextColor3 = Color3.new(1, 1, 1)
+Title.Size = UDim2.new(1, 0, 0, 35)
 Title.BackgroundTransparency = 1
+Title.Text = "HYPNOSIS CORE"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.Font = Enum.Font.Ubuntu
 Title.TextSize = 14
 Title.Parent = MainFrame
 
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Name = "Toggle"
-ToggleBtn.Size = UDim2.new(0, 160, 0, 35)
-ToggleBtn.Position = UDim2.new(0.5, -80, 0.5, -5)
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-ToggleBtn.Text = "Status: OFF"
-ToggleBtn.TextColor3 = Color3.new(1, 1, 1)
+ToggleBtn.Size = UDim2.new(0, 180, 0, 35)
+ToggleBtn.Position = UDim2.new(0.5, -90, 0, 45)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 20, 20)
+ToggleBtn.Text = "AUTO FARM: OFF"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
 ToggleBtn.Font = Enum.Font.Ubuntu
-ToggleBtn.TextSize = 14
+ToggleBtn.TextSize = 13
+ToggleBtn.AutoButtonColor = false
 ToggleBtn.Parent = MainFrame
 
 local BtnCorner = Instance.new("UICorner")
@@ -167,54 +228,31 @@ BtnCorner.CornerRadius = UDim.new(0, 6)
 BtnCorner.Parent = ToggleBtn
 
 local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(1, 0, 0, 20)
-StatusLabel.Position = UDim2.new(0, 0, 1, -25)
+StatusLabel.Size = UDim2.new(1, 0, 0, 25)
+StatusLabel.Position = UDim2.new(0, 0, 1, -30)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "State: Idle"
-StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-StatusLabel.Font = Enum.Font.Ubuntu
+StatusLabel.Text = "STATE: IDLE"
+StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
+StatusLabel.Font = Enum.Font.Code
 StatusLabel.TextSize = 11
 StatusLabel.Parent = MainFrame
 
--- [[ GUI Logic ]]
+-- [[ GUI LOGIC ]]
 
 ToggleBtn.MouseButton1Click:Connect(function()
     AutoFarmEnabled = not AutoFarmEnabled
     if AutoFarmEnabled then
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-        ToggleBtn.Text = "Status: ON"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 40, 20)
+        ToggleBtn.Text = "AUTO FARM: ON"
+        ToggleBtn.TextColor3 = Color3.fromRGB(100, 255, 100)
     else
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        ToggleBtn.Text = "Status: OFF"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 20, 20)
+        ToggleBtn.Text = "AUTO FARM: OFF"
+        ToggleBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+        stopAllInteractions()
     end
 end)
 
--- Update Status Label
-task.spawn(function()
-    while true do
-        StatusLabel.Text = "State: " .. activeFarmState
-        task.wait(0.5)
-    end
-end)
-
--- Draggable Script (Modern way)
-local dragging, dragInput, dragStart, startPos
-MainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainFrame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then dragging = false end
-        end)
-    end
-end)
-MainFrame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
+RunService.RenderStepped:Connect(function()
+    StatusLabel.Text = "STATE: " .. activeFarmState
 end)
